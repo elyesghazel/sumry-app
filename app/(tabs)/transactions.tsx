@@ -15,9 +15,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../src/components/Screen';
 import { TransactionRow } from '../../src/components/TransactionRow';
 import { useApp } from '../../src/store';
-import { formatAmount, groupByDay } from '../../src/format';
+import { formatAmount, groupByDay, isTransfer, signOf } from '../../src/format';
+import { resolveRange } from '../../src/analytics';
+import type { Timeframe } from '../../src/preferences';
 import { radius, space, type } from '../../src/theme';
 import { usePreferences, useTheme } from '../../src/preferences';
+
+/** The periods worth having one tap away in a list. */
+const PERIOD_OPTIONS: { key: Timeframe; label: string }[] = [
+  { key: 'month', label: 'This month' },
+  { key: '30d', label: '30 days' },
+  { key: '3m', label: '3 months' },
+  { key: 'year', label: 'This year' },
+];
 
 export default function Transactions() {
   const theme = useTheme();
@@ -34,6 +44,8 @@ export default function Transactions() {
     if (q) setQuery(q);
   }, [q]);
   const [accountFilter, setAccountFilter] = useState<string | null>(null);
+  // `null` means all time; otherwise a shared timeframe key.
+  const [period, setPeriod] = useState<Timeframe | null>(null);
 
   const categoryByLabel = useMemo(
     () => new Map(categories.map((c) => [c.label, c])),
@@ -44,10 +56,17 @@ export default function Transactions() {
     [accounts],
   );
 
+  // Resolved once per render rather than per row.
+  const window = useMemo(() => (period ? resolveRange(period) : null), [period]);
+
   const sections = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const filtered = transactions.filter((tx) => {
       if (accountFilter && tx.userAccountId !== accountFilter) return false;
+      if (window) {
+        const t = new Date(tx.date).getTime();
+        if (t < window.from.getTime() || t > window.to.getTime()) return false;
+      }
       if (!needle) return true;
       return (
         (tx.description ?? '').toLowerCase().includes(needle) ||
@@ -63,7 +82,26 @@ export default function Transactions() {
       return [{ key: 'all', title: '', total: 0, data: flat }];
     }
     return groupByDay(filtered);
-  }, [transactions, query, accountFilter, prefs.groupByDay]);
+  }, [transactions, query, accountFilter, prefs.groupByDay, window]);
+
+  /**
+   * Totals for whatever is on screen. Derived from the rows rather than the section
+   * totals, which are only populated when day grouping is on.
+   */
+  const summary = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    let count = 0;
+    for (const s of sections) {
+      for (const tx of s.data) {
+        count++;
+        if (isTransfer(tx.kind)) continue;
+        if (signOf(tx.kind) > 0) income += tx.amount;
+        else expense += tx.amount;
+      }
+    }
+    return { income, expense, count };
+  }, [sections]);
 
   return (
     <Screen>
@@ -95,6 +133,22 @@ export default function Transactions() {
           ) : null}
         </View>
 
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chips}
+        >
+          <Chip label="All time" active={period === null} onPress={() => setPeriod(null)} />
+          {PERIOD_OPTIONS.map((p) => (
+            <Chip
+              key={p.key}
+              label={p.label}
+              active={period === p.key}
+              onPress={() => setPeriod(period === p.key ? null : p.key)}
+            />
+          ))}
+        </ScrollView>
+
         {accounts.length > 1 ? (
           <ScrollView
             horizontal
@@ -117,6 +171,17 @@ export default function Transactions() {
           </ScrollView>
         ) : null}
       </View>
+
+      {period || accountFilter || query ? (
+        <View style={styles.summaryRow}>
+          <Text style={[type.caption, { color: theme.textFaint }]}>
+            {summary.count} entries
+          </Text>
+          <Text style={[type.caption, { color: theme.textFaint }]}>
+            in {formatAmount(summary.income)} · out {formatAmount(summary.expense)}
+          </Text>
+        </View>
+      ) : null}
 
       <SectionList
         sections={sections}
@@ -218,4 +283,10 @@ const styles = StyleSheet.create({
     paddingBottom: space.xs,
   },
   empty: { alignItems: 'center', paddingVertical: 64 },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: space.xl,
+    paddingTop: space.md,
+  },
 });
