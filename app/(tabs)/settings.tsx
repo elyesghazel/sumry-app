@@ -25,6 +25,34 @@ export default function Settings() {
   const [accountName, setAccountName] = useState('');
   const [openingBalance, setOpeningBalance] = useState('');
 
+  // Account currently being reconciled ("abgleichen"), and the real balance entered.
+  const [reconciling, setReconciling] = useState<string | null>(null);
+  const [realBalance, setRealBalance] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const reconcile = async (id: string) => {
+    const target = Number.parseFloat(realBalance.replace(',', '.'));
+    if (!Number.isFinite(target)) return;
+    setBusy(true);
+    try {
+      const account = accounts.find((a) => a.id === id);
+      const diff = target - (account?.currentBalance ?? 0);
+      await mutate((t) => api.reconcileAccount(t, id, target, 'Abgleich'));
+      setReconciling(null);
+      setRealBalance('');
+      Alert.alert(
+        Math.abs(diff) < 0.005 ? 'Already up to date' : 'Account adjusted',
+        Math.abs(diff) < 0.005
+          ? 'The balance already matched — nothing was booked.'
+          : `Booked ${diff > 0 ? '+' : '−'}${formatAmount(diff)} as an "Einstellung" entry.`,
+      );
+    } catch (e) {
+      Alert.alert('Could not adjust', e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const addAccount = async () => {
     const name = accountName.trim();
     const balance = Number.parseFloat(openingBalance || '0');
@@ -145,7 +173,16 @@ export default function Settings() {
           {accounts.map((a, i) => (
             <View key={a.id}>
               {i > 0 ? <Divider /> : null}
-              <Pressable onLongPress={() => removeAccount(a.id, a.accountName)} style={styles.row}>
+              <Pressable
+                onPress={() => {
+                  setReconciling(reconciling === a.id ? null : a.id);
+                  setRealBalance(
+                    reconciling === a.id ? '' : String((a.currentBalance ?? 0).toFixed(2)),
+                  );
+                }}
+                onLongPress={() => removeAccount(a.id, a.accountName)}
+                style={styles.row}
+              >
                 <View
                   style={[
                     styles.accountDot,
@@ -156,7 +193,65 @@ export default function Settings() {
                 <Text style={[type.amount, { color: theme.textMuted, fontSize: 15 }]}>
                   {formatAmount(a.currentBalance ?? 0)}
                 </Text>
+                <Ionicons
+                  name={reconciling === a.id ? 'chevron-up' : 'swap-vertical-outline'}
+                  size={16}
+                  color={theme.textFaint}
+                />
               </Pressable>
+
+              {reconciling === a.id ? (
+                <View style={{ paddingHorizontal: space.lg, paddingBottom: space.lg, gap: space.sm }}>
+                  <Text style={[type.caption, { color: theme.textFaint }]}>
+                    Real balance — the difference is booked as an "Einstellung" entry
+                  </Text>
+                  <TextInput
+                    value={realBalance}
+                    onChangeText={setRealBalance}
+                    placeholder="e.g. 128.40"
+                    placeholderTextColor={theme.textFaint}
+                    keyboardType="decimal-pad"
+                    autoFocus
+                    style={[
+                      styles.input,
+                      {
+                        color: theme.text,
+                        backgroundColor: theme.keypad,
+                        borderColor: theme.hairline,
+                      },
+                    ]}
+                  />
+                  {Number.isFinite(Number.parseFloat(realBalance.replace(',', '.'))) ? (
+                    <Text style={[type.label, { color: theme.textMuted }]}>
+                      Adjustment:{' '}
+                      {(() => {
+                        const d =
+                          Number.parseFloat(realBalance.replace(',', '.')) -
+                          (a.currentBalance ?? 0);
+                        return `${d >= 0 ? '+' : '−'}${formatAmount(d)}`;
+                      })()}
+                    </Text>
+                  ) : null}
+                  <View style={{ flexDirection: 'row', gap: space.sm }}>
+                    <Pressable
+                      onPress={() => setReconciling(null)}
+                      style={[styles.action, { borderColor: theme.hairline }]}
+                    >
+                      <Text style={[type.label, { color: theme.textMuted }]}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => reconcile(a.id)}
+                      disabled={busy}
+                      style={[
+                        styles.action,
+                        { backgroundColor: theme.text, borderColor: theme.text, opacity: busy ? 0.4 : 1 },
+                      ]}
+                    >
+                      <Text style={[type.label, { color: theme.bg }]}>Adjust</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
             </View>
           ))}
 

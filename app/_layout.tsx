@@ -3,6 +3,13 @@ import { ActivityIndicator, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import {
+  Figtree_300Light,
+  Figtree_400Regular,
+  Figtree_500Medium,
+  Figtree_600SemiBold,
+  useFonts,
+} from '@expo-google-fonts/figtree';
 import { AppProvider, useApp } from '../src/store';
 import { PreferencesProvider, useTheme } from '../src/preferences';
 import { Screen } from '../src/components/Screen';
@@ -40,6 +47,16 @@ function Splash() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    Figtree_300Light,
+    Figtree_400Regular,
+    Figtree_500Medium,
+    Figtree_600SemiBold,
+  });
+
+  // Holding the first frame avoids a visible reflow from the system face to Figtree.
+  if (!fontsLoaded) return null;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

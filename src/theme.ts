@@ -145,6 +145,18 @@ export function categoryColor(theme: Theme, key: string, explicit?: string | nul
   return theme.categorical[hash % theme.categorical.length];
 }
 
+/**
+ * Figtree, loaded at startup. Weights are referenced by family name rather than
+ * fontWeight: on Android a numeric weight against a custom family silently falls back to
+ * the system face, so each weight has to be its own family.
+ */
+export const font = {
+  regular: 'Figtree_400Regular',
+  medium: 'Figtree_500Medium',
+  semibold: 'Figtree_600SemiBold',
+  light: 'Figtree_300Light',
+};
+
 /** 4pt spacing scale. */
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 
@@ -152,10 +164,10 @@ export const radius = { sm: 10, md: 16, lg: 22, pill: 999 };
 
 export const type = {
   // Tabular figures keep columns of money from jittering as digits change.
-  display: { fontSize: 44, fontWeight: '300' as const, fontVariant: ['tabular-nums' as const] },
-  amount: { fontSize: 17, fontWeight: '500' as const, fontVariant: ['tabular-nums' as const] },
-  title: { fontSize: 20, fontWeight: '600' as const },
-  body: { fontSize: 15, fontWeight: '400' as const },
-  label: { fontSize: 13, fontWeight: '500' as const },
-  caption: { fontSize: 11, fontWeight: '500' as const, letterSpacing: 0.6 },
+  display: { fontSize: 44, fontFamily: font.light, fontVariant: ['tabular-nums' as const] },
+  amount: { fontSize: 17, fontFamily: font.medium, fontVariant: ['tabular-nums' as const] },
+  title: { fontSize: 20, fontFamily: font.semibold },
+  body: { fontSize: 15, fontFamily: font.regular },
+  label: { fontSize: 13, fontFamily: font.medium },
+  caption: { fontSize: 11, fontFamily: font.medium, letterSpacing: 0.6 },
 };
