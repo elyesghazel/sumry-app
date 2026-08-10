@@ -23,7 +23,7 @@ export default function Overview() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { prefs, set, tick } = usePreferences();
+  const { prefs, set, tick, hidden, reveal, mask } = usePreferences();
   const { accounts, categories, transactions, refreshing, refresh, error } = useApp();
 
   const range = useMemo(() => resolveRange(prefs.timeframe), [prefs.timeframe]);
@@ -98,16 +98,43 @@ export default function Overview() {
             </View>
           </Pressable>
 
-          <View style={styles.heroAmount}>
-            <Text style={[type.display, { color: theme.text }]}>{formatAmount(netWorth)}</Text>
+          {/* Tapping the balance reveals it; it re-hides as soon as the app is backgrounded. */}
+          <Pressable
+            onPress={() => {
+              if (prefs.privacy !== 'off') {
+                tick();
+                reveal();
+              }
+            }}
+            style={styles.heroAmount}
+            accessibilityRole={prefs.privacy !== 'off' ? 'button' : undefined}
+            accessibilityLabel={hidden ? 'Balance hidden, tap to reveal' : undefined}
+          >
+            <Text style={[type.display, { color: theme.text }]}>
+              {mask(formatAmount(netWorth))}
+            </Text>
             <Text style={[type.body, { color: theme.textFaint, marginBottom: 8 }]}>
               {' '}
               {prefs.currency}
             </Text>
-          </View>
+            {prefs.privacy !== 'off' ? (
+              <Ionicons
+                name={hidden ? 'eye-off-outline' : 'eye-outline'}
+                size={16}
+                color={theme.textFaint}
+                style={{ marginBottom: 12, marginLeft: space.sm }}
+              />
+            ) : null}
+          </Pressable>
 
           <View style={{ marginTop: space.xs }}>
-            <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
+            {hidden ? (
+              <Text style={[type.label, { color: theme.textFaint }]}>
+                Hidden · tap to show
+              </Text>
+            ) : (
+              <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
+            )}
           </View>
         </View>
 
@@ -122,7 +149,7 @@ export default function Overview() {
                   Spending
                 </Text>
                 <Text style={[type.amount, { color: theme.text, fontSize: 15 }]}>
-                  {formatAmount(periodTotals.expense)}
+                  {mask(formatAmount(periodTotals.expense), 'all')}
                 </Text>
               </View>
               <Sparkline values={trend} color={theme.negative} />
@@ -167,10 +194,14 @@ export default function Overview() {
                     {a.accountName}
                   </Text>
                   <Text style={[type.amount, { color: theme.text, fontSize: 19, marginTop: 6 }]}>
-                    {formatAmount(a.currentBalance ?? 0)}
+                    {mask(formatAmount(a.currentBalance ?? 0))}
                   </Text>
                   <View style={{ marginTop: 6 }}>
-                    <Delta value={delta} size="sm" />
+                    {hidden ? (
+                      <Text style={[type.caption, { color: theme.textFaint }]}>—</Text>
+                    ) : (
+                      <Delta value={delta} size="sm" />
+                    )}
                   </View>
                 </View>
               </Glass>
@@ -232,6 +263,7 @@ function FlowBar({
   color: string;
 }) {
   const theme = useTheme();
+  const { mask } = usePreferences();
   return (
     <View>
       <View style={styles.flowHeader}>
@@ -239,7 +271,7 @@ function FlowBar({
           <View style={[styles.swatch, { backgroundColor: color }]} />
           <Text style={[type.label, { color: theme.textMuted }]}>{label}</Text>
         </View>
-        <Text style={[type.amount, { color: theme.text }]}>{formatAmount(amount)}</Text>
+        <Text style={[type.amount, { color: theme.text }]}>{mask(formatAmount(amount), 'all')}</Text>
       </View>
       <View style={[styles.track, { backgroundColor: theme.keypad }]}>
         <View

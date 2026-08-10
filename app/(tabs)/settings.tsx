@@ -10,6 +10,7 @@ import { API_URL, api } from '../../src/api';
 import { TIMEFRAMES, usePreferences, useTheme } from '../../src/preferences';
 import { formatAmount } from '../../src/format';
 import { ThemeMode } from '../../src/theme';
+import type { PrivacyMode } from '../../src/preferences';
 import { radius, space, type } from '../../src/theme';
 
 const CURRENCIES = ['CHF', 'EUR', 'USD', 'GBP'];
@@ -18,7 +19,7 @@ export default function Settings() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { prefs, set, reset } = usePreferences();
+  const { prefs, set, reset, mask } = usePreferences();
   const { user, accounts, categories, transactions, signOut, mutate } = useApp();
 
   const [addingAccount, setAddingAccount] = useState(false);
@@ -129,6 +130,17 @@ export default function Settings() {
             ]}
           />
           <Divider />
+          <SegmentRow<PrivacyMode>
+            label="Hide amounts"
+            value={prefs.privacy}
+            onChange={(v) => set('privacy', v)}
+            options={[
+              { key: 'off', label: 'Off' },
+              { key: 'balances', label: 'Balances' },
+              { key: 'all', label: 'Everything' },
+            ]}
+          />
+          <Divider />
           <SwitchRow
             icon="phone-portrait-outline"
             label="Haptics"
@@ -191,7 +203,7 @@ export default function Settings() {
                 />
                 <Text style={[type.body, { color: theme.text, flex: 1 }]}>{a.accountName}</Text>
                 <Text style={[type.amount, { color: theme.textMuted, fontSize: 15 }]}>
-                  {formatAmount(a.currentBalance ?? 0)}
+                  {mask(formatAmount(a.currentBalance ?? 0))}
                 </Text>
                 <Ionicons
                   name={reconciling === a.id ? 'chevron-up' : 'swap-vertical-outline'}

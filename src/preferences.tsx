@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import { AppState, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { Theme, ThemeMode, resolveTheme } from './theme';
@@ -30,8 +30,16 @@ export const INSIGHT_CARDS = [
 
 export type InsightCard = (typeof INSIGHT_CARDS)[number]['key'];
 
+/**
+ * How much of the money is hidden when someone else can see the screen.
+ * `balances` covers the figures that reveal how much you have; `all` also masks the
+ * individual amounts in lists.
+ */
+export type PrivacyMode = 'off' | 'balances' | 'all';
+
 export type Preferences = {
   themeMode: ThemeMode;
+  privacy: PrivacyMode;
   currency: string;
   /** Pre-selected account on the entry screen; null means "first account". */
   defaultAccountId: string | null;
@@ -48,6 +56,7 @@ export type Preferences = {
 
 const DEFAULTS: Preferences = {
   themeMode: 'system',
+  privacy: 'off',
   currency: 'CHF',
   defaultAccountId: null,
   haptics: true,
@@ -65,6 +74,13 @@ type Ctx = {
   reset: () => void;
   /** Fires a selection tick unless the user turned haptics off. */
   tick: () => void;
+
+  /** True while figures are hidden — i.e. privacy is on and nothing is revealed. */
+  hidden: boolean;
+  /** Momentarily show the real figures. Resets when the app leaves the foreground. */
+  reveal: () => void;
+  /** Formats an amount, or returns a mask when it should not be on screen. */
+  mask: (formatted: string, level?: 'balances' | 'all') => string;
 };
 
 const PreferencesContext = createContext<Ctx | null>(null);
@@ -116,9 +132,35 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     if (prefs.haptics) Haptics.selectionAsync().catch(() => {});
   }, [prefs.haptics]);
 
+  // Revealing is deliberately not persisted: putting the phone down and picking it up
+  // again should never leave the balance showing.
+  const [revealed, setRevealed] = useState(false);
+
+  useEffect(() => {
+    if (!revealed) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') setRevealed(false);
+    });
+    return () => sub.remove();
+  }, [revealed]);
+
+  const hidden = prefs.privacy !== 'off' && !revealed;
+
+  const reveal = useCallback(() => setRevealed((r) => !r), []);
+
+  const mask = useCallback(
+    (formatted: string, level: 'balances' | 'all' = 'balances') => {
+      if (!hidden) return formatted;
+      // 'all' figures stay visible when only balances are hidden.
+      if (level === 'all' && prefs.privacy !== 'all') return formatted;
+      return '•'.repeat(Math.max(3, Math.min(6, formatted.replace(/[^0-9]/g, '').length)));
+    },
+    [hidden, prefs.privacy],
+  );
+
   const value = useMemo<Ctx>(
-    () => ({ prefs, ready, theme, set, reset, tick }),
-    [prefs, ready, theme, set, reset, tick],
+    () => ({ prefs, ready, theme, set, reset, tick, hidden, reveal, mask }),
+    [prefs, ready, theme, set, reset, tick, hidden, reveal, mask],
   );
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;

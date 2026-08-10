@@ -37,7 +37,7 @@ export default function Insights() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { prefs, set, tick } = usePreferences();
+  const { prefs, set, tick, mask } = usePreferences();
   const { accounts, categories, transactions, budgets, progress, refreshing, refresh, mutate } =
     useApp();
 
@@ -130,22 +130,22 @@ export default function Insights() {
             <View style={styles.statGrid}>
               <Stat
                 label="Spent"
-                value={formatAmount(now.expense)}
+                value={mask(formatAmount(now.expense), 'all')}
                 foot={<DeltaPercent value={pctChange(now.expense, before.expense)} invert />}
               />
               <Stat
                 label="Received"
-                value={formatAmount(now.income)}
+                value={mask(formatAmount(now.income), 'all')}
                 foot={<DeltaPercent value={pctChange(now.income, before.income)} />}
               />
               <Stat
                 label="Net"
-                value={formatAmount(now.net)}
+                value={mask(formatAmount(now.net), 'all')}
                 foot={<Delta value={now.net} size="sm" />}
               />
               <Stat
                 label="Per day"
-                value={formatAmount(perDay)}
+                value={mask(formatAmount(perDay), 'all')}
                 foot={
                   <Text style={[type.caption, { color: theme.textFaint }]}>
                     {now.count} entries
@@ -203,7 +203,7 @@ export default function Insights() {
                     {a.accountName}
                   </Text>
                   <Text style={[type.amount, { color: theme.textMuted, fontSize: 15 }]}>
-                    {formatAmount(a.currentBalance ?? 0)}
+                    {mask(formatAmount(a.currentBalance ?? 0))}
                   </Text>
                   <View style={{ width: 96, alignItems: 'flex-end' }}>
                     <Delta value={accountDelta(a, transactions, range)} size="sm" />

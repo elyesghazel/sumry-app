@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Category, Transaction } from '../api';
 import { formatAmount, formatTime, isTransfer, signOf } from '../format';
 import { categoryColor, radius, space, type } from '../theme';
-import { useTheme } from '../preferences';
+import { usePreferences, useTheme } from '../preferences';
 
 type Props = {
   tx: Transaction;
@@ -17,6 +17,7 @@ type Props = {
 
 export function TransactionRow({ tx, category, accountName, showAccount, onPress }: Props) {
   const theme = useTheme();
+  const { mask } = usePreferences();
   const transfer = isTransfer(tx.kind);
   const sign = signOf(tx.kind);
 
@@ -63,7 +64,7 @@ export function TransactionRow({ tx, category, accountName, showAccount, onPress
       <View style={styles.trailing}>
         <Text style={[type.amount, { color: amountColor }]}>
           {sign > 0 ? '+' : '−'}
-          {formatAmount(tx.amount)}
+          {mask(formatAmount(tx.amount), 'all')}
         </Text>
         <Text style={[type.caption, { color: theme.textFaint, marginTop: 2 }]}>
           {formatTime(new Date(tx.date))}

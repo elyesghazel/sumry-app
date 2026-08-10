@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 import { useTheme } from '../preferences';
@@ -32,13 +32,16 @@ export function BarSeries({
   const theme = useTheme();
   const [active, setActive] = useState<number | null>(null);
 
-  const max = Math.max(...data.map((d) => d.value), 1);
-  const peak = data.reduce((best, d, i) => (d.value > data[best].value ? i : best), 0);
+  // Beyond this the bars are thinner than the gaps between them, so buckets are merged
+  // rather than drawn. Sixty daily bars on a phone is a comb, not a chart.
+  const bars = useMemo(() => condense(data, 31), [data]);
 
-  // Too many bars to label individually — show first, peak and last only.
-  const labelled = new Set([0, peak, data.length - 1]);
+  const max = Math.max(...bars.map((d) => d.value), 1);
+  const peak = bars.reduce((best, d, i) => (d.value > bars[best].value ? i : best), 0);
+
+  const labelled = new Set([0, peak, bars.length - 1]);
   const shown = active ?? peak;
-  const showable = data[shown];
+  const showable = bars[shown];
 
   return (
     <View>
@@ -48,43 +51,42 @@ export function BarSeries({
           <Text style={[type.caption, { color: theme.textFaint }]}>{currency}</Text>
         </Text>
         <Text style={[type.caption, { color: theme.textFaint }]}>
-          {active === null ? `peak · ${showable?.label ?? ''}` : showable?.label}
+          {active === null ? `peak \u00b7 ${showable?.label ?? ''}` : showable?.label}
         </Text>
       </View>
 
+      {/* Heights are computed in pixels. A percentage height chained through several
+          auto-height parents resolves inconsistently and lets the row grow unbounded. */}
       <View style={[styles.barRow, { height }]}>
-        {data.map((d, i) => {
+        {bars.map((d, i) => {
           const isActive = i === shown;
+          const barHeight = d.value > 0 ? Math.max(3, (d.value / max) * height) : 2;
           return (
             <Pressable
               key={d.key}
               onPressIn={() => setActive(i)}
               onPressOut={() => setActive(null)}
-              // Hit target spans the full height so thin bars stay tappable.
               style={styles.barSlot}
               accessibilityLabel={`${d.label}: ${formatAmount(d.value)} ${currency}`}
             >
-              <View style={styles.barTrack}>
-                <View
-                  style={{
-                    height: `${Math.max(d.value > 0 ? 2 : 0, (d.value / max) * 100)}%`,
-                    backgroundColor: isActive ? theme.text : color,
-                    opacity: d.value === 0 ? 0.25 : isActive ? 1 : 0.85,
-                    // Rounded data-end anchored to the baseline.
-                    borderTopLeftRadius: 3,
-                    borderTopRightRadius: 3,
-                    width: '100%',
-                  }}
-                />
-              </View>
+              <View
+                style={{
+                  width: '100%',
+                  height: barHeight,
+                  backgroundColor: isActive ? theme.text : color,
+                  opacity: d.value === 0 ? 0.25 : isActive ? 1 : 0.85,
+                  borderTopLeftRadius: 3,
+                  borderTopRightRadius: 3,
+                }}
+              />
             </Pressable>
           );
         })}
       </View>
 
       <View style={[styles.axis, { borderTopColor: theme.grid }]}>
-        {data.map((d, i) => (
-          <View key={d.key} style={styles.barSlot}>
+        {bars.map((d, i) => (
+          <View key={d.key} style={styles.axisSlot}>
             {labelled.has(i) ? (
               <Text style={[type.caption, { color: theme.textFaint }]} numberOfLines={1}>
                 {d.label}
@@ -95,6 +97,26 @@ export function BarSeries({
       </View>
     </View>
   );
+}
+
+/** Merges adjacent buckets until at most [limit] remain, summing their values. */
+function condense(data: BarDatum[], limit: number): BarDatum[] {
+  if (data.length <= limit) return data;
+  const groupSize = Math.ceil(data.length / limit);
+  const out: BarDatum[] = [];
+  for (let i = 0; i < data.length; i += groupSize) {
+    const slice = data.slice(i, i + groupSize);
+    out.push({
+      key: slice[0].key,
+      // The label spans the merged range, so the axis stays honest about what a bar is.
+      label:
+        slice.length > 1
+          ? `${slice[0].label}\u2013${slice[slice.length - 1].label}`
+          : slice[0].label,
+      value: slice.reduce((sum, d) => sum + d.value, 0),
+    });
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------- sparkline
@@ -227,26 +249,24 @@ export function MonthColumns({ data, height = 130 }: { data: MonthDatum[]; heigh
         {data.map((d) => (
           <View key={d.key} style={styles.barSlot}>
             <View style={styles.pairRow}>
-              <View style={styles.pairTrack}>
-                <View
-                  style={{
-                    height: `${Math.max(d.income > 0 ? 2 : 0, (d.income / max) * 100)}%`,
-                    backgroundColor: theme.positive,
-                    borderTopLeftRadius: 3,
-                    borderTopRightRadius: 3,
-                  }}
-                />
-              </View>
-              <View style={styles.pairTrack}>
-                <View
-                  style={{
-                    height: `${Math.max(d.expense > 0 ? 2 : 0, (d.expense / max) * 100)}%`,
-                    backgroundColor: theme.negative,
-                    borderTopLeftRadius: 3,
-                    borderTopRightRadius: 3,
-                  }}
-                />
-              </View>
+              <View
+                style={{
+                  flex: 1,
+                  height: d.income > 0 ? Math.max(3, (d.income / max) * height) : 2,
+                  backgroundColor: theme.positive,
+                  borderTopLeftRadius: 3,
+                  borderTopRightRadius: 3,
+                }}
+              />
+              <View
+                style={{
+                  flex: 1,
+                  height: d.expense > 0 ? Math.max(3, (d.expense / max) * height) : 2,
+                  backgroundColor: theme.negative,
+                  borderTopLeftRadius: 3,
+                  borderTopRightRadius: 3,
+                }}
+              />
             </View>
           </View>
         ))}
@@ -254,7 +274,7 @@ export function MonthColumns({ data, height = 130 }: { data: MonthDatum[]; heigh
 
       <View style={[styles.axis, { borderTopColor: theme.grid }]}>
         {data.map((d) => (
-          <View key={d.key} style={styles.barSlot}>
+          <View key={d.key} style={styles.axisSlot}>
             <Text style={[type.caption, { color: theme.textFaint }]} numberOfLines={1}>
               {d.label}
             </Text>
@@ -282,18 +302,19 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     marginBottom: space.md,
   },
-  barRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 2 },
-  barSlot: { flex: 1, height: '100%', justifyContent: 'flex-end', alignItems: 'center' },
-  barTrack: { width: '100%', height: '100%', justifyContent: 'flex-end' },
-  pairRow: { flexDirection: 'row', gap: 2, height: '100%', width: '100%', alignItems: 'flex-end' },
-  pairTrack: { flex: 1, height: '100%', justifyContent: 'flex-end' },
+  barRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, overflow: 'hidden' },
+  barSlot: { flex: 1, justifyContent: 'flex-end', alignItems: 'stretch' },
+  pairRow: { flexDirection: 'row', gap: 2, alignItems: 'flex-end', width: '100%' },
+  // Fixed height: an auto-height row of labels was free to grow without bound.
   axis: {
     flexDirection: 'row',
     gap: 2,
+    height: 20,
+    alignItems: 'center',
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: space.xs,
     marginTop: space.xs,
   },
+  axisSlot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   rankHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
