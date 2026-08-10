@@ -36,8 +36,9 @@ export function TransactionRow({ tx, category, accountName, showAccount, onPress
     ? theme.textMuted
     : categoryColor(theme, tx.categoryLabel ?? '', category?.color);
 
-  // Transfers are movements, not spending — they stay neutral rather than red or green.
-  const amountColor = transfer ? theme.textMuted : sign > 0 ? theme.positive : theme.text;
+  // Transfers are movements between your own accounts, not spending, so they stay
+  // neutral. Everything else is coloured by direction.
+  const amountColor = transfer ? theme.textMuted : sign > 0 ? theme.positive : theme.negative;
 
   return (
     <Pressable

@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { formatAmount } from '../format';
 import { type } from '../theme';
-import { useTheme } from '../preferences';
+import { usePreferences, useTheme } from '../preferences';
 
 /**
  * A signed change with a direction arrow.
@@ -17,13 +17,17 @@ export function Delta({
   size = 'md',
   /** For costs, where a rise is bad news; flips which direction reads as positive. */
   invert = false,
+  /** Off only where the surrounding text already names the unit. */
+  showUnit = true,
 }: {
   value: number;
   suffix?: string;
   size?: 'sm' | 'md';
   invert?: boolean;
+  showUnit?: boolean;
 }) {
   const theme = useTheme();
+  const { prefs, mask } = usePreferences();
 
   const flat = Math.abs(value) < 0.005;
   const up = value > 0;
@@ -41,7 +45,8 @@ export function Delta({
         color={color}
       />
       <Text style={[textStyle, { color }]}>
-        {formatAmount(value)}
+        {mask(formatAmount(value), 'all')}
+        {showUnit ? ` ${prefs.currency}` : ''}
         {suffix ? ` ${suffix}` : ''}
       </Text>
     </View>
@@ -63,7 +68,9 @@ export function DeltaPercent({ value, invert = false }: { value: number | null; 
   return (
     <View style={styles.row}>
       <Ionicons name={flat ? 'remove' : up ? 'arrow-up' : 'arrow-down'} size={11} color={color} />
-      <Text style={[type.caption, { color }]}>{Math.abs(Math.round(value))}%</Text>
+      <Text style={[type.caption, { color }]}>
+        {Math.abs(Math.round(value))}% vs prev.
+      </Text>
     </View>
   );
 }

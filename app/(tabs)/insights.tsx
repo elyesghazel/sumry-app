@@ -140,8 +140,9 @@ export default function Insights() {
               />
               <Stat
                 label="Net"
-                value={mask(formatAmount(now.net), 'all')}
-                foot={<Delta value={now.net} size="sm" />}
+                value={`${now.net < 0 ? '−' : ''}${mask(formatAmount(now.net), 'all')}`}
+                tone={now.net}
+                foot={<Delta value={now.net} size="sm" showUnit={false} />}
               />
               <Stat
                 label="Per day"
@@ -266,6 +267,7 @@ function Budgets({
   mutate: ReturnType<typeof useApp>['mutate'];
 }) {
   const theme = useTheme();
+  const { prefs } = usePreferences();
   const [adding, setAdding] = useState(false);
   const [category, setCategory] = useState<string | null>(null);
   const [limit, setLimit] = useState('');
@@ -321,7 +323,7 @@ function Budgets({
                       {b.categoryLabel}
                     </Text>
                     <Text style={[type.label, { color: over ? theme.negative : theme.textMuted }]}>
-                      {formatAmount(spent)} / {formatAmount(b.limitAmount)}
+                      {formatAmount(spent)} / {formatAmount(b.limitAmount)} {prefs.currency}
                     </Text>
                   </View>
                   <View style={[styles.track, { backgroundColor: theme.keypad, marginTop: 6 }]}>
@@ -439,18 +441,27 @@ function Stat({
   label,
   value,
   foot,
+  tone,
 }: {
   label: string;
   value: string;
   foot?: React.ReactNode;
+  /** Signed figures colour by direction; plain totals stay neutral. */
+  tone?: number;
 }) {
   const theme = useTheme();
+  const colour =
+    tone === undefined || Math.abs(tone) < 0.005
+      ? theme.text
+      : tone > 0
+        ? theme.positive
+        : theme.negative;
   return (
     <View style={styles.stat}>
       <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
         {label}
       </Text>
-      <Text style={[type.amount, { color: theme.text, fontSize: 20, marginVertical: 4 }]}>
+      <Text style={[type.amount, { color: colour, fontSize: 20, marginVertical: 4 }]}>
         {value}
       </Text>
       {foot}

@@ -178,7 +178,8 @@ export default function Transactions() {
             {summary.count} entries
           </Text>
           <Text style={[type.caption, { color: theme.textFaint }]}>
-            in {formatAmount(summary.income)} · out {formatAmount(summary.expense)}
+            in <Text style={{ color: theme.positive }}>{formatAmount(summary.income)}</Text> ·
+            out <Text style={{ color: theme.negative }}>{formatAmount(summary.expense)}</Text>
           </Text>
         </View>
       ) : null}
@@ -201,7 +202,12 @@ export default function Transactions() {
             <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
               {section.title}
             </Text>
-            <Text style={[type.caption, { color: theme.textFaint }]}>
+            <Text
+              style={[
+                type.caption,
+                { color: section.total >= 0 ? theme.positive : theme.negative },
+              ]}
+            >
               {section.total >= 0 ? '+' : '−'}
               {formatAmount(section.total)}
             </Text>
