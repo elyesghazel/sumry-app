@@ -18,8 +18,9 @@ import { Screen } from '../src/components/Screen';
 import { Keypad, applyKey } from '../src/components/Keypad';
 import { useApp } from '../src/store';
 import { api, Category } from '../src/api';
-import { CURRENCY, formatDayHeading, isTransfer } from '../src/format';
-import { radius, space, type, useTheme } from '../src/theme';
+import { formatDayHeading, isTransfer } from '../src/format';
+import { categoryColor, radius, space, type } from '../src/theme';
+import { usePreferences, useTheme } from '../src/preferences';
 
 type Mode = 'EXPENSE' | 'INCOME' | 'TRANSFER';
 
@@ -29,6 +30,7 @@ export default function Entry() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { accounts, categories, transactions, mutate } = useApp();
+  const { prefs } = usePreferences();
 
   const editing = useMemo(
     () => (id ? transactions.find((t) => t.id === id) : undefined),
@@ -58,7 +60,7 @@ export default function Entry() {
     editing?.categoryLabel ?? null,
   );
   const [accountId, setAccountId] = useState<string | null>(
-    editing?.userAccountId ?? accounts[0]?.id ?? null,
+    editing?.userAccountId ?? prefs.defaultAccountId ?? accounts[0]?.id ?? null,
   );
   const [fromId, setFromId] = useState<string | null>(
     transferLegs?.out?.userAccountId ?? accounts[0]?.id ?? null,
@@ -239,7 +241,7 @@ export default function Entry() {
       {/* Amount */}
       <View style={styles.amountRow}>
         <Text style={[type.body, { color: theme.textFaint, marginBottom: 10 }]}>
-          {CURRENCY}
+          {prefs.currency}
         </Text>
         <Text style={[type.display, { color: amountColor, fontSize: 52 }]} numberOfLines={1}>
           {mode === 'EXPENSE' ? '−' : mode === 'INCOME' ? '+' : ''}
@@ -300,7 +302,7 @@ export default function Entry() {
                           color={
                             categoryLabel === c.label
                               ? theme.bg
-                              : (c.color ?? theme.textMuted)
+                              : categoryColor(theme, c.label, c.color)
                           }
                         />
                         <Text

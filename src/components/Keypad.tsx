@@ -1,8 +1,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import { radius, space, useTheme } from '../theme';
+import { radius, space } from '../theme';
+import { usePreferences, useTheme } from '../preferences';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'] as const;
 
@@ -15,6 +15,7 @@ const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'del'] as c
  */
 export function Keypad({ onKey }: { onKey: (key: string) => void }) {
   const theme = useTheme();
+  const { tick } = usePreferences();
 
   return (
     <View style={styles.grid}>
@@ -22,7 +23,7 @@ export function Keypad({ onKey }: { onKey: (key: string) => void }) {
         <Pressable
           key={key}
           onPress={() => {
-            Haptics.selectionAsync().catch(() => {});
+            tick();
             onKey(key);
           }}
           accessibilityRole="button"

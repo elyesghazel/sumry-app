@@ -4,8 +4,8 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppProvider, useApp } from '../src/store';
+import { PreferencesProvider, useTheme } from '../src/preferences';
 import { Screen } from '../src/components/Screen';
-import { useTheme } from '../src/theme';
 
 /**
  * Keeps the visible route in step with the session: an expired token drops you on the
@@ -43,7 +43,8 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <AppProvider>
+        <PreferencesProvider>
+          <AppProvider>
           <AuthGate>
             <Stack
               screenOptions={{
@@ -57,9 +58,14 @@ export default function RootLayout() {
                 name="entry"
                 options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
               />
+              <Stack.Screen name="settings/categories" />
+              <Stack.Screen name="settings/category" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="settings/password" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="settings/insights" />
             </Stack>
-          </AuthGate>
-        </AppProvider>
+            </AuthGate>
+          </AppProvider>
+        </PreferencesProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

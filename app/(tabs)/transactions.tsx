@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   RefreshControl,
   SectionList,
@@ -9,22 +9,30 @@ import {
   Pressable,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../src/components/Screen';
 import { TransactionRow } from '../../src/components/TransactionRow';
 import { useApp } from '../../src/store';
 import { formatAmount, groupByDay } from '../../src/format';
-import { radius, space, type, useTheme } from '../../src/theme';
+import { radius, space, type } from '../../src/theme';
+import { usePreferences, useTheme } from '../../src/preferences';
 
 export default function Transactions() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { accounts, categories, transactions, refreshing, refresh } = useApp();
+  const { prefs } = usePreferences();
 
-  const [query, setQuery] = useState('');
+  // Arriving from a category bar in Insights pre-fills the search.
+  const { q } = useLocalSearchParams<{ q?: string }>();
+  const [query, setQuery] = useState(q ?? '');
+
+  useEffect(() => {
+    if (q) setQuery(q);
+  }, [q]);
   const [accountFilter, setAccountFilter] = useState<string | null>(null);
 
   const categoryByLabel = useMemo(
@@ -47,8 +55,15 @@ export default function Transactions() {
         formatAmount(tx.amount).includes(needle)
       );
     });
+    if (!prefs.groupByDay) {
+      // One unlabelled section keeps the SectionList shape without the day headers.
+      const flat = [...filtered].sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+      );
+      return [{ key: 'all', title: '', total: 0, data: flat }];
+    }
     return groupByDay(filtered);
-  }, [transactions, query, accountFilter]);
+  }, [transactions, query, accountFilter, prefs.groupByDay]);
 
   return (
     <Screen>
@@ -115,7 +130,8 @@ export default function Transactions() {
             tintColor={theme.textMuted}
           />
         }
-        renderSectionHeader={({ section }) => (
+        renderSectionHeader={({ section }) =>
+          section.title === '' ? null : (
           <View style={styles.dayHeader}>
             <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
               {section.title}
@@ -125,7 +141,8 @@ export default function Transactions() {
               {formatAmount(section.total)}
             </Text>
           </View>
-        )}
+          )
+        }
         renderItem={({ item }) => (
           <TransactionRow
             tx={item}

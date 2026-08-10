@@ -2,7 +2,7 @@ import React from 'react';
 import { Platform, StyleSheet, View, ViewProps, ViewStyle } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { radius } from '../theme';
-import { useTheme } from '../theme';
+import { useTheme } from '../preferences';
 
 type Props = ViewProps & {
   /** `strong` is reserved for surfaces that float above content, like the entry sheet. */

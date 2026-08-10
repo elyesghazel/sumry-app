@@ -14,7 +14,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '../src/components/Screen';
 import { Glass } from '../src/components/Glass';
 import { useApp } from '../src/store';
-import { radius, space, type, useTheme } from '../src/theme';
+import { radius, space, type } from '../src/theme';
+import { useTheme } from '../src/preferences';
 
 export default function SignIn() {
   const theme = useTheme();
@@ -50,8 +51,10 @@ export default function SignIn() {
 
   return (
     <Screen>
+      {/* `height` on Android and `padding` on iOS is the combination that actually
+          shrinks the scroll area rather than sliding it under the keyboard. */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
         <ScrollView
@@ -60,6 +63,10 @@ export default function SignIn() {
             { paddingTop: insets.top + space.xxl, paddingBottom: insets.bottom + space.xl },
           ]}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          showsVerticalScrollIndicator={false}
+          // Keeps the focused field in view instead of letting the keyboard cover it.
+          automaticallyAdjustKeyboardInsets
         >
           <View style={styles.brand}>
             <Text style={[type.display, { color: theme.text }]}>Sumry</Text>

@@ -3,7 +3,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Category, Transaction } from '../api';
 import { formatAmount, formatTime, isTransfer, signOf } from '../format';
-import { radius, space, type, useTheme } from '../theme';
+import { categoryColor, radius, space, type } from '../theme';
+import { useTheme } from '../preferences';
 
 type Props = {
   tx: Transaction;
@@ -30,7 +31,9 @@ export function TransactionRow({ tx, category, accountName, showAccount, onPress
     .join(' · ');
 
   const iconName = (transfer ? 'swap-horizontal' : (category?.icon ?? 'pricetag')) as never;
-  const tint = transfer ? theme.textMuted : (category?.color ?? theme.textMuted);
+  const tint = transfer
+    ? theme.textMuted
+    : categoryColor(theme, tx.categoryLabel ?? '', category?.color);
 
   // Transfers are movements, not spending — they stay neutral rather than red or green.
   const amountColor = transfer ? theme.textMuted : sign > 0 ? theme.positive : theme.text;

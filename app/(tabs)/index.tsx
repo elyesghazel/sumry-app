@@ -1,34 +1,32 @@
 import React, { useMemo } from 'react';
-import {
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  Pressable,
-} from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../src/components/Screen';
 import { Glass } from '../../src/components/Glass';
 import { TransactionRow } from '../../src/components/TransactionRow';
+import { Delta } from '../../src/components/Delta';
+import { Sparkline } from '../../src/components/charts';
 import { useApp } from '../../src/store';
+import { usePreferences, useTheme, TIMEFRAMES } from '../../src/preferences';
 import {
-  CURRENCY,
-  formatAmount,
-  formatMonthLabel,
-  isTransfer,
-  sameMonth,
-  signOf,
-} from '../../src/format';
-import { radius, space, type, useTheme } from '../../src/theme';
+  accountDelta,
+  resolveRange,
+  spendBuckets,
+  totals,
+} from '../../src/analytics';
+import { formatAmount } from '../../src/format';
+import { categoryColor, radius, space, type } from '../../src/theme';
 
 export default function Overview() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { prefs, set, tick } = usePreferences();
   const { accounts, categories, transactions, refreshing, refresh, error } = useApp();
+
+  const range = useMemo(() => resolveRange(prefs.timeframe), [prefs.timeframe]);
 
   const categoryByLabel = useMemo(
     () => new Map(categories.map((c) => [c.label, c])),
@@ -44,20 +42,18 @@ export default function Overview() {
     [accounts],
   );
 
-  // This month's in/out across every account. Transfers are excluded: moving money
-  // between your own accounts is not income and not spending.
-  const month = useMemo(() => {
-    const now = new Date();
-    let income = 0;
-    let expense = 0;
-    for (const tx of transactions) {
-      if (isTransfer(tx.kind)) continue;
-      if (!sameMonth(new Date(tx.date), now)) continue;
-      if (signOf(tx.kind) > 0) income += tx.amount;
-      else expense += tx.amount;
-    }
-    return { income, expense, net: income - expense };
-  }, [transactions]);
+  const periodTotals = useMemo(() => totals(transactions, range), [transactions, range]);
+
+  // Net movement across every account over the window — the change behind the headline.
+  const netChange = useMemo(
+    () => accounts.reduce((sum, a) => sum + accountDelta(a, transactions, range), 0),
+    [accounts, transactions, range],
+  );
+
+  const trend = useMemo(
+    () => spendBuckets(transactions, range).map((b) => b.value),
+    [transactions, range],
+  );
 
   const recent = useMemo(
     () =>
@@ -67,7 +63,13 @@ export default function Overview() {
     [transactions],
   );
 
-  const flowMax = Math.max(month.income, month.expense, 1);
+  const flowMax = Math.max(periodTotals.income, periodTotals.expense, 1);
+
+  const cycleTimeframe = () => {
+    const i = TIMEFRAMES.findIndex((t) => t.key === prefs.timeframe);
+    tick();
+    set('timeframe', TIMEFRAMES[(i + 1) % TIMEFRAMES.length].key);
+  };
 
   return (
     <Screen>
@@ -77,11 +79,7 @@ export default function Overview() {
           paddingBottom: insets.bottom + 96,
         }}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refresh}
-            tintColor={theme.textMuted}
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.textMuted} />
         }
       >
         {error ? (
@@ -90,63 +88,94 @@ export default function Overview() {
 
         {/* Net worth — the one number worth showing large. */}
         <View style={styles.hero}>
-          <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
-            Total balance
-          </Text>
+          <Pressable onPress={cycleTimeframe} hitSlop={8} style={styles.timeframeRow}>
+            <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
+              Total balance
+            </Text>
+            <View style={[styles.timeframeChip, { backgroundColor: theme.keypad }]}>
+              <Text style={[type.caption, { color: theme.textMuted }]}>{range.label}</Text>
+              <Ionicons name="chevron-down" size={11} color={theme.textFaint} />
+            </View>
+          </Pressable>
+
           <View style={styles.heroAmount}>
             <Text style={[type.display, { color: theme.text }]}>{formatAmount(netWorth)}</Text>
             <Text style={[type.body, { color: theme.textFaint, marginBottom: 8 }]}>
               {' '}
-              {CURRENCY}
+              {prefs.currency}
             </Text>
           </View>
-          <Text style={[type.label, { color: theme.textMuted }]}>
-            {formatMonthLabel(new Date())} · {month.net >= 0 ? '+' : '−'}
-            {formatAmount(month.net)} this month
-          </Text>
+
+          <View style={{ marginTop: space.xs }}>
+            <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
+          </View>
         </View>
 
-        {/* In vs out, as two proportional bars. Easier to read than two more numbers. */}
-        <Glass style={styles.card}>
+        {/* Spending shape over the window. */}
+        {trend.some((v) => v > 0) ? (
+          <Glass style={styles.card}>
+            <View style={styles.cardInner}>
+              <View style={styles.cardHead}>
+                <Text
+                  style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}
+                >
+                  Spending
+                </Text>
+                <Text style={[type.amount, { color: theme.text, fontSize: 15 }]}>
+                  {formatAmount(periodTotals.expense)}
+                </Text>
+              </View>
+              <Sparkline values={trend} color={theme.negative} />
+            </View>
+          </Glass>
+        ) : null}
+
+        {/* In vs out as two proportional bars — easier to read than two more numbers. */}
+        <Glass style={[styles.card, { marginTop: space.md }]}>
           <View style={styles.cardInner}>
             <FlowBar
               label="In"
-              amount={month.income}
-              fraction={month.income / flowMax}
+              amount={periodTotals.income}
+              fraction={periodTotals.income / flowMax}
               color={theme.positive}
             />
             <View style={{ height: space.lg }} />
             <FlowBar
               label="Out"
-              amount={month.expense}
-              fraction={month.expense / flowMax}
+              amount={periodTotals.expense}
+              fraction={periodTotals.expense / flowMax}
               color={theme.negative}
             />
           </View>
         </Glass>
 
-        {/* Accounts */}
+        {/* Accounts, each with its movement over the window. */}
         <SectionHeading title="Accounts" />
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.accountStrip}
         >
-          {accounts.map((a) => (
-            <Glass key={a.id} radiusSize={radius.md} style={styles.accountCard}>
-              <View style={styles.accountInner}>
-                <Text
-                  style={[type.label, { color: theme.textMuted }]}
-                  numberOfLines={1}
-                >
-                  {a.accountName}
-                </Text>
-                <Text style={[type.amount, { color: theme.text, fontSize: 19, marginTop: 6 }]}>
-                  {formatAmount(a.currentBalance ?? 0)}
-                </Text>
-              </View>
-            </Glass>
-          ))}
+          {accounts.map((a, i) => {
+            const delta = accountDelta(a, transactions, range);
+            const accent = theme.categorical[i % theme.categorical.length];
+            return (
+              <Glass key={a.id} radiusSize={radius.md} style={styles.accountCard}>
+                <View style={[styles.accountAccent, { backgroundColor: accent }]} />
+                <View style={styles.accountInner}>
+                  <Text style={[type.label, { color: theme.textMuted }]} numberOfLines={1}>
+                    {a.accountName}
+                  </Text>
+                  <Text style={[type.amount, { color: theme.text, fontSize: 19, marginTop: 6 }]}>
+                    {formatAmount(a.currentBalance ?? 0)}
+                  </Text>
+                  <View style={{ marginTop: 6 }}>
+                    <Delta value={delta} size="sm" />
+                  </View>
+                </View>
+              </Glass>
+            );
+          })}
           {accounts.length === 0 ? (
             <Text style={[type.label, { color: theme.textFaint, paddingHorizontal: space.lg }]}>
               No accounts yet — add one in Settings.
@@ -206,7 +235,10 @@ function FlowBar({
   return (
     <View>
       <View style={styles.flowHeader}>
-        <Text style={[type.label, { color: theme.textMuted }]}>{label}</Text>
+        <View style={styles.flowLabel}>
+          <View style={[styles.swatch, { backgroundColor: color }]} />
+          <Text style={[type.label, { color: theme.textMuted }]}>{label}</Text>
+        </View>
         <Text style={[type.amount, { color: theme.text }]}>{formatAmount(amount)}</Text>
       </View>
       <View style={[styles.track, { backgroundColor: theme.keypad }]}>
@@ -248,15 +280,32 @@ function SectionHeading({
 const styles = StyleSheet.create({
   error: { paddingHorizontal: space.xl, marginBottom: space.sm },
   hero: { paddingHorizontal: space.xl, marginBottom: space.xl },
-  heroAmount: { flexDirection: 'row', alignItems: 'flex-end', marginTop: space.xs },
+  timeframeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  timeframeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: space.sm,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  heroAmount: { flexDirection: 'row', alignItems: 'flex-end', marginTop: space.sm },
   card: { marginHorizontal: space.lg },
   cardInner: { padding: space.lg },
+  cardHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginBottom: space.sm,
+  },
   flowHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
     marginBottom: space.sm,
   },
+  flowLabel: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  swatch: { width: 8, height: 8, borderRadius: 2 },
   track: { height: 6, borderRadius: radius.pill, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: radius.pill },
   sectionHeading: {
@@ -268,7 +317,9 @@ const styles = StyleSheet.create({
     marginBottom: space.md,
   },
   accountStrip: { paddingHorizontal: space.lg, gap: space.md },
-  accountCard: { width: 150 },
+  accountCard: { width: 158 },
+  // A thin colour edge identifies the account without flooding the card.
+  accountAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   accountInner: { padding: space.lg },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: 64 },
   empty: { alignItems: 'center', paddingVertical: space.xl },

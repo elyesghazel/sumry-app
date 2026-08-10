@@ -2,10 +2,10 @@ import React from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
-import { radius, space, useTheme } from '../../src/theme';
+import { radius, space } from '../../src/theme';
+import { usePreferences, useTheme } from '../../src/preferences';
 
 /**
  * Four tabs and one action. The action sits in the middle of the bar because logging a
@@ -13,6 +13,7 @@ import { radius, space, useTheme } from '../../src/theme';
  */
 export default function TabsLayout() {
   const theme = useTheme();
+  const { tick } = usePreferences();
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
@@ -73,16 +74,16 @@ export default function TabsLayout() {
           options={{ tabBarButton: () => <View style={{ flex: 1 }} /> }}
         />
         <Tabs.Screen
-          name="budgets"
+          name="insights"
           options={{
             tabBarIcon: ({ color, focused }) => (
               <Ionicons
-                name={focused ? 'pie-chart' : 'pie-chart-outline'}
+                name={focused ? 'stats-chart' : 'stats-chart-outline'}
                 size={21}
                 color={color}
               />
             ),
-            tabBarAccessibilityLabel: 'Budgets',
+            tabBarAccessibilityLabel: 'Insights',
           }}
         />
         <Tabs.Screen
@@ -102,7 +103,7 @@ export default function TabsLayout() {
 
       <Pressable
         onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          tick();
           router.push('/entry');
         }}
         accessibilityRole="button"

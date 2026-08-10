@@ -134,7 +134,19 @@ export const api = {
   deleteAccount: (token: string, id: string) =>
     request<void>(`/api/users/accounts/${id}`, { token, method: 'DELETE' }),
 
+  changePassword: (token: string, currentPassword: string, newPassword: string) =>
+    request<void>('/api/users/password', {
+      token,
+      body: { currentPassword, newPassword },
+      method: 'PUT',
+    }),
+
   categories: (token: string) => request<Category[]>('/api/category/user', { token }),
+
+  // The backend identifies categories by label and takes it in the body, including on
+  // DELETE, which is unusual but is the contract.
+  deleteCategory: (token: string, label: string) =>
+    request<void>('/api/category/label', { token, body: { label }, method: 'DELETE' }),
 
   createCategory: (
     token: string,
