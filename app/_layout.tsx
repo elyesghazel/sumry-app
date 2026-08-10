@@ -13,6 +13,7 @@ import {
 import { AppProvider, useApp } from '../src/store';
 import { PreferencesProvider, useTheme } from '../src/preferences';
 import { Screen } from '../src/components/Screen';
+import { LockGate } from '../src/components/LockGate';
 
 /**
  * Keeps the visible route in step with the session: an expired token drops you on the
@@ -63,6 +64,7 @@ export default function RootLayout() {
         <PreferencesProvider>
           <AppProvider>
           <AuthGate>
+            <LockGate>
             <Stack
               screenOptions={{
                 headerShown: false,
@@ -80,6 +82,7 @@ export default function RootLayout() {
               <Stack.Screen name="settings/password" options={{ presentation: 'modal' }} />
               <Stack.Screen name="settings/insights" />
             </Stack>
+            </LockGate>
             </AuthGate>
           </AppProvider>
         </PreferencesProvider>

@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { Screen } from '../../src/components/Screen';
 import { Divider, Group, LinkRow, SegmentRow, SwitchRow } from '../../src/components/Rows';
 import { useApp } from '../../src/store';
@@ -27,6 +28,28 @@ export default function Settings() {
   const [openingBalance, setOpeningBalance] = useState('');
 
   // Account currently being reconciled ("abgleichen"), and the real balance entered.
+  // Whether this device can actually do it; the toggle is pointless otherwise.
+  const [biometrics, setBiometrics] = useState<{ ok: boolean; label: string } | null>(null);
+
+  React.useEffect(() => {
+    (async () => {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync().catch(() => false);
+      const enrolled = await LocalAuthentication.isEnrolledAsync().catch(() => false);
+      const types = await LocalAuthentication.supportedAuthenticationTypesAsync().catch(
+        () => [] as LocalAuthentication.AuthenticationType[],
+      );
+      const label = types.includes(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
+        ? 'Face unlock'
+        : types.includes(LocalAuthentication.AuthenticationType.FINGERPRINT)
+          ? 'Fingerprint'
+          : 'Device unlock';
+      setBiometrics({
+        ok: hasHardware && enrolled,
+        label: !hasHardware ? 'No biometric hardware' : !enrolled ? 'Nothing enrolled on this device' : label,
+      });
+    })();
+  }, []);
+
   const [reconciling, setReconciling] = useState<string | null>(null);
   const [realBalance, setRealBalance] = useState('');
   const [busy, setBusy] = useState(false);
@@ -140,6 +163,48 @@ export default function Settings() {
               { key: 'all', label: 'Everything' },
             ]}
           />
+          <Divider />
+          <SwitchRow
+            icon="lock-closed-outline"
+            label="App lock"
+            hint={
+              biometrics?.ok
+                ? `Require ${biometrics.label.toLowerCase()} to open Sumry`
+                : (biometrics?.label ?? 'Checking…')
+            }
+            value={prefs.appLock && (biometrics?.ok ?? false)}
+            onChange={(v) => {
+              if (!biometrics?.ok) {
+                Alert.alert(
+                  'Not available',
+                  'Set up a fingerprint, face unlock or a screen lock in your phone settings first.',
+                );
+                return;
+              }
+              set('appLock', v);
+            }}
+          />
+          {prefs.appLock && biometrics?.ok ? (
+            <>
+              <Divider />
+              <LinkRow
+                icon="time-outline"
+                label="Lock after"
+                value={
+                  prefs.lockDelaySeconds === 0
+                    ? 'Immediately'
+                    : prefs.lockDelaySeconds >= 60
+                      ? `${Math.round(prefs.lockDelaySeconds / 60)} min`
+                      : `${prefs.lockDelaySeconds}s`
+                }
+                onPress={() => {
+                  const steps = [0, 15, 60, 300, 900];
+                  const i = steps.indexOf(prefs.lockDelaySeconds);
+                  set('lockDelaySeconds', steps[(i + 1) % steps.length]);
+                }}
+              />
+            </>
+          ) : null}
           <Divider />
           <SwitchRow
             icon="phone-portrait-outline"

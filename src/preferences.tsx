@@ -40,6 +40,10 @@ export type PrivacyMode = 'off' | 'balances' | 'all';
 export type Preferences = {
   themeMode: ThemeMode;
   privacy: PrivacyMode;
+  /** Require a device unlock (biometric or passcode) before the app can be used. */
+  appLock: boolean;
+  /** Seconds in the background before it locks again. 0 locks every time. */
+  lockDelaySeconds: number;
   currency: string;
   /** Pre-selected account on the entry screen; null means "first account". */
   defaultAccountId: string | null;
@@ -57,6 +61,8 @@ export type Preferences = {
 const DEFAULTS: Preferences = {
   themeMode: 'system',
   privacy: 'off',
+  appLock: false,
+  lockDelaySeconds: 60,
   currency: 'CHF',
   defaultAccountId: null,
   haptics: true,
@@ -81,6 +87,28 @@ type Ctx = {
   reveal: () => void;
   /** Formats an amount, or returns a mask when it should not be on screen. */
   mask: (formatted: string, level?: 'balances' | 'all') => string;
+
+  /** Applies preferences fetched from the server without echoing them back. */
+  applyRemote: (remote: Partial<Preferences>) => void;
+  /** Registers the uploader used for account-level settings. */
+  registerSync: (fn: SyncFn | null) => void;
+};
+
+/** Uploads the account-level subset. Registered by the data store, which holds the token. */
+export type SyncFn = (patch: Record<string, unknown>) => Promise<unknown>;
+
+/**
+ * Settings that live on the account rather than the device, so a reinstall or a second
+ * device inherits them. Everything else — haptics, which cards are shown — describes the
+ * phone in your hand and stays local.
+ */
+const SERVER_BACKED: Partial<Record<keyof Preferences, string>> = {
+  themeMode: 'theme',
+  privacy: 'privacy',
+  currency: 'preferredCurrency',
+  timeframe: 'timeframe',
+  appLock: 'appLock',
+  lockDelaySeconds: 'lockDelaySeconds',
 };
 
 const PreferencesContext = createContext<Ctx | null>(null);
@@ -110,6 +138,12 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
   }, []);
 
+  // Held in a ref so registering the uploader never re-renders every consumer.
+  const syncRef = React.useRef<SyncFn | null>(null);
+  const registerSync = useCallback((fn: SyncFn | null) => {
+    syncRef.current = fn;
+  }, []);
+
   const set = useCallback(
     <K extends keyof Preferences>(key: K, value: Preferences[K]) => {
       setPrefs((current) => {
@@ -117,9 +151,24 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
         return next;
       });
+
+      const field = SERVER_BACKED[key];
+      // Fire and forget: the local write already happened, so a failed upload costs
+      // the sync, not the setting.
+      if (field && syncRef.current) {
+        syncRef.current({ [field]: value }).catch(() => {});
+      }
     },
     [],
   );
+
+  const applyRemote = useCallback((remote: Partial<Preferences>) => {
+    setPrefs((current) => {
+      const next = { ...current, ...remote };
+      AsyncStorage.setItem(KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
 
   const reset = useCallback(() => persist(DEFAULTS), [persist]);
 
@@ -159,8 +208,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   );
 
   const value = useMemo<Ctx>(
-    () => ({ prefs, ready, theme, set, reset, tick, hidden, reveal, mask }),
-    [prefs, ready, theme, set, reset, tick, hidden, reveal, mask],
+    () => ({ prefs, ready, theme, set, reset, tick, hidden, reveal, mask, applyRemote, registerSync }),
+    [prefs, ready, theme, set, reset, tick, hidden, reveal, mask, applyRemote, registerSync],
   );
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;

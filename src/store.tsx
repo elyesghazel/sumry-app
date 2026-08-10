@@ -7,6 +7,7 @@ import React, {
   useState,
 } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import { usePreferences } from './preferences';
 import {
   Account,
   ApiError,
@@ -47,6 +48,9 @@ type Ctx = {
 const AppContext = createContext<Ctx | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
+  // AppProvider sits inside PreferencesProvider, so it can hand the token-bearing
+  // uploader down to it and push account-level settings on change.
+  const { applyRemote, registerSync } = usePreferences();
   const [status, setStatus] = useState<Status>('loading');
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<Me | null>(null);
@@ -77,18 +81,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setRefreshing(true);
       const now = new Date();
       try {
-        const [acc, cat, tx, bud, prog] = await Promise.all([
+        const [acc, cat, tx, bud, prog, remote] = await Promise.all([
           api.accounts(t),
           api.categories(t),
           api.transactions(t),
           api.budgets(t),
           api.budgetProgress(t, now.getMonth() + 1, now.getFullYear()),
+          // Preferences are nice-to-have: a failure here must not blank the dashboard.
+          api.preferences(t).catch(() => null),
         ]);
         setAccounts(acc);
         setCategories(cat.filter((c) => c.isActive !== false));
         setTransactions(tx);
         setBudgets(bud);
         setProgress(prog);
+        if (remote) {
+          applyRemote({
+            themeMode: remote.theme as never,
+            privacy: remote.privacy as never,
+            currency: remote.preferredCurrency,
+            timeframe: remote.timeframe as never,
+            appLock: remote.appLock,
+            lockDelaySeconds: remote.lockDelaySeconds,
+          });
+        }
         setError(null);
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
@@ -100,8 +116,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setRefreshing(false);
       }
     },
-    [clearSession],
+    [clearSession, applyRemote],
   );
+
+  // Keep the uploader in step with the current token.
+  useEffect(() => {
+    registerSync(token ? (patch) => api.updatePreferences(token, patch) : null);
+    return () => registerSync(null);
+  }, [token, registerSync]);
 
   // Restore a stored session on cold start.
   useEffect(() => {

@@ -64,6 +64,16 @@ export type BudgetProgress = {
 
 export type Me = { id: string; username: string; email: string };
 
+export type ServerPreferences = {
+  preferredCurrency: string;
+  theme: string;
+  language: string;
+  privacy: string;
+  appLock: boolean;
+  lockDelaySeconds: number;
+  timeframe: string;
+};
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -122,6 +132,11 @@ export const api = {
     request<Me>('/api/users/register', { body: { username, email, password } }),
 
   me: (token: string) => request<Me>('/api/users/validate', { token }),
+
+  preferences: (token: string) => request<ServerPreferences>('/api/users/preferences', { token }),
+
+  updatePreferences: (token: string, patch: Record<string, unknown>) =>
+    request<ServerPreferences>('/api/users/preferences', { token, body: patch, method: 'PUT' }),
 
   accounts: (token: string) => request<Account[]>('/api/users/accounts/', { token }),
 
