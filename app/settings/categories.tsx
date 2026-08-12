@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +8,8 @@ import { Glass } from '../../src/components/Glass';
 import { useApp } from '../../src/store';
 import { api, Category } from '../../src/api';
 import { useTheme } from '../../src/preferences';
+import { useToast } from '../../src/components/Toast';
+import { useDestructiveAction } from '../../src/components/ConfirmDialog';
 import { categoryColor, radius, space, type } from '../../src/theme';
 
 export default function Categories() {
@@ -15,6 +17,8 @@ export default function Categories() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { categories, transactions, mutate } = useApp();
+  const toast = useToast();
+  const confirmDestructive = useDestructiveAction();
 
   // How often each category is used — deleting an unused one is safe, deleting a
   // heavily-used one is worth warning about.
@@ -40,22 +44,19 @@ export default function Categories() {
 
   const remove = (c: Category) => {
     const used = usage.get(c.label) ?? 0;
-    Alert.alert(
-      'Delete category?',
-      used > 0
-        ? `${c.label} is used by ${used} transaction${used === 1 ? '' : 's'}. They keep their history, but the category will no longer be offered.`
-        : c.label,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () =>
-            mutate((t) => api.deleteCategory(t, c.label)).catch((e) =>
-              Alert.alert('Could not delete', e instanceof Error ? e.message : 'Unknown error'),
-            ),
-        },
-      ],
+    void confirmDestructive(
+      {
+        title: 'Delete this category?',
+        message:
+          used > 0
+            ? `${c.label} is used by ${used} transaction${used === 1 ? '' : 's'}. They keep their history, but the category will no longer be offered.`
+            : c.label,
+      },
+      () => mutate((t) => api.deleteCategory(t, c.label)),
+      {
+        onSuccess: () => toast.success('Category deleted', c.label),
+        onError: (message) => toast.error('Could not delete', message),
+      },
     );
   };
 

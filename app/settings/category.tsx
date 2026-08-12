@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,6 +17,7 @@ import { Screen } from '../../src/components/Screen';
 import { useApp } from '../../src/store';
 import { CategoryType, api } from '../../src/api';
 import { useTheme } from '../../src/preferences';
+import { useToast } from '../../src/components/Toast';
 import { radius, space, type } from '../../src/theme';
 
 /** A small, deliberately finite icon set — enough to be expressive, few enough to scan. */
@@ -35,6 +35,7 @@ export default function CategoryEditor() {
   const router = useRouter();
   const { label: editingLabel } = useLocalSearchParams<{ label?: string }>();
   const { categories, mutate } = useApp();
+  const toast = useToast();
 
   const existing = useMemo(
     () => categories.find((c) => c.label === editingLabel),
@@ -83,7 +84,7 @@ export default function CategoryEditor() {
       }
       router.back();
     } catch (e) {
-      Alert.alert('Could not save', e instanceof Error ? e.message : 'Unknown error');
+      toast.error('Could not save', e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setBusy(false);
     }

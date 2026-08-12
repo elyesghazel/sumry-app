@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,8 @@ import { Divider, Group, LinkRow, SegmentRow, SwitchRow } from '../../src/compon
 import { useApp } from '../../src/store';
 import { API_URL, api } from '../../src/api';
 import { TIMEFRAMES, usePreferences, useTheme } from '../../src/preferences';
+import { useToast } from '../../src/components/Toast';
+import { useConfirm, useDestructiveAction } from '../../src/components/ConfirmDialog';
 import { formatAmount } from '../../src/format';
 import { ThemeMode } from '../../src/theme';
 import type { PrivacyMode } from '../../src/preferences';
@@ -22,6 +24,9 @@ export default function Settings() {
   const router = useRouter();
   const { prefs, set, reset, mask } = usePreferences();
   const { user, accounts, categories, transactions, signOut, mutate } = useApp();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const confirmDestructive = useDestructiveAction();
 
   const [addingAccount, setAddingAccount] = useState(false);
   const [accountName, setAccountName] = useState('');
@@ -64,14 +69,19 @@ export default function Settings() {
       await mutate((t) => api.reconcileAccount(t, id, target, 'Abgleich'));
       setReconciling(null);
       setRealBalance('');
-      Alert.alert(
-        Math.abs(diff) < 0.005 ? 'Already up to date' : 'Account adjusted',
-        Math.abs(diff) < 0.005
-          ? 'The balance already matched — nothing was booked.'
-          : `Booked ${diff > 0 ? '+' : '−'}${formatAmount(diff)} as an "Einstellung" entry.`,
-      );
+      if (Math.abs(diff) < 0.005) {
+        toast.show({
+          message: 'Already up to date',
+          description: 'The balance already matched — nothing was booked.',
+        });
+      } else {
+        toast.success(
+          'Account adjusted',
+          `Booked ${diff > 0 ? '+' : '−'}${formatAmount(diff)} as an "Einstellung" entry.`,
+        );
+      }
     } catch (e) {
-      Alert.alert('Could not adjust', e instanceof Error ? e.message : 'Unknown error');
+      toast.error('Could not adjust', e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setBusy(false);
     }
@@ -86,23 +96,24 @@ export default function Settings() {
       setAddingAccount(false);
       setAccountName('');
       setOpeningBalance('');
+      toast.success('Account added', name);
     } catch (e) {
-      Alert.alert('Could not add account', e instanceof Error ? e.message : 'Unknown error');
+      toast.error('Could not add account', e instanceof Error ? e.message : 'Unknown error');
     }
   };
 
   const removeAccount = (id: string, name: string) =>
-    Alert.alert('Delete account?', `${name} and its transactions will be removed.`, [
-      { text: 'Cancel', style: 'cancel' },
+    void confirmDestructive(
       {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () =>
-          mutate((t) => api.deleteAccount(t, id)).catch((e) =>
-            Alert.alert('Could not delete', e instanceof Error ? e.message : 'Unknown error'),
-          ),
+        title: 'Delete this account?',
+        message: `${name} and every transaction on it will be removed. This cannot be undone.`,
       },
-    ]);
+      () => mutate((t) => api.deleteAccount(t, id)),
+      {
+        onSuccess: () => toast.success('Account deleted', name),
+        onError: (message) => toast.error('Could not delete', message),
+      },
+    );
 
   const defaultAccountName =
     accounts.find((a) => a.id === prefs.defaultAccountId)?.accountName ?? 'First account';
@@ -175,10 +186,12 @@ export default function Settings() {
             value={prefs.appLock && (biometrics?.ok ?? false)}
             onChange={(v) => {
               if (!biometrics?.ok) {
-                Alert.alert(
-                  'Not available',
-                  'Set up a fingerprint, face unlock or a screen lock in your phone settings first.',
-                );
+                toast.show({
+                  message: 'App lock is not available',
+                  description:
+                    'Set up a fingerprint, face unlock or a screen lock in your phone settings first.',
+                  tone: 'error',
+                });
                 return;
               }
               set('appLock', v);
@@ -425,10 +438,16 @@ export default function Settings() {
 
         <Pressable
           onPress={() =>
-            Alert.alert('Reset preferences?', 'Your data is not affected.', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Reset', style: 'destructive', onPress: reset },
-            ])
+            void confirmDestructive(
+              {
+                title: 'Reset preferences?',
+                message: 'Appearance, privacy and defaults go back to stock. Your data is not affected.',
+                confirmLabel: 'Reset',
+                icon: 'refresh-outline',
+              },
+              async () => reset(),
+              { onSuccess: () => toast.success('Preferences reset') },
+            )
           }
           style={[styles.footerAction, { borderColor: theme.hairline }]}
         >
@@ -436,12 +455,16 @@ export default function Settings() {
         </Pressable>
 
         <Pressable
-          onPress={() =>
-            Alert.alert('Sign out?', undefined, [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
-            ])
-          }
+          onPress={async () => {
+            const ok = await confirm({
+              title: 'Sign out?',
+              message: `You will need your password to get back into ${user?.email ?? 'Sumry'}.`,
+              confirmLabel: 'Sign out',
+              destructive: true,
+              icon: 'log-out-outline',
+            });
+            if (ok) void signOut();
+          }}
           style={[styles.footerAction, { borderColor: theme.hairline, marginTop: space.sm }]}
         >
           <Text style={[type.label, { color: theme.negative }]}>Sign out</Text>

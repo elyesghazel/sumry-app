@@ -17,6 +17,7 @@ import {
   totals,
 } from '../../src/analytics';
 import { formatAmount } from '../../src/format';
+import { useDeleteTransaction } from '../../src/actions';
 import { categoryColor, radius, space, type } from '../../src/theme';
 
 export default function Overview() {
@@ -25,6 +26,7 @@ export default function Overview() {
   const router = useRouter();
   const { prefs, set, tick, hidden, reveal, mask } = usePreferences();
   const { accounts, categories, transactions, refreshing, refresh, error } = useApp();
+  const deleteTransaction = useDeleteTransaction();
 
   const range = useMemo(() => resolveRange(prefs.timeframe), [prefs.timeframe]);
 
@@ -233,6 +235,7 @@ export default function Overview() {
                   accountName={accountById.get(tx.userAccountId ?? '')}
                   showAccount={accounts.length > 1}
                   onPress={() => router.push({ pathname: '/entry', params: { id: tx.id } })}
+                  onDelete={() => deleteTransaction(tx)}
                 />
               </View>
             ))}

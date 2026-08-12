@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -14,11 +13,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Haptics from 'expo-haptics';
 import { Screen } from '../src/components/Screen';
 import { Keypad, applyKey } from '../src/components/Keypad';
+import { SuccessBurst } from '../src/components/SuccessBurst';
+import { useToast } from '../src/components/Toast';
+import { useDestructiveAction } from '../src/components/ConfirmDialog';
 import { useApp } from '../src/store';
 import { api, Category } from '../src/api';
-import { formatDayHeading, isTransfer } from '../src/format';
+import { formatAmount, formatDayHeading, isTransfer } from '../src/format';
 import { categoryColor, radius, space, type } from '../src/theme';
 import { usePreferences, useTheme } from '../src/preferences';
 
@@ -31,6 +34,8 @@ export default function Entry() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { accounts, categories, transactions, mutate } = useApp();
   const { prefs } = usePreferences();
+  const toast = useToast();
+  const confirmDestructive = useDestructiveAction();
 
   const editing = useMemo(
     () => (id ? transactions.find((t) => t.id === id) : undefined),
@@ -72,6 +77,8 @@ export default function Entry() {
   const [date, setDate] = useState(() => (editing ? new Date(editing.date) : new Date()));
   const [showPicker, setShowPicker] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Set once the write has landed; the burst owns the screen until it dismisses itself.
+  const [saved, setSaved] = useState<{ title: string; subtitle: string } | null>(null);
 
   const numericAmount = Number.parseFloat(amount || '0');
 
@@ -156,38 +163,53 @@ export default function Entry() {
           }),
         );
       }
-      router.back();
+
+      if (prefs.haptics && Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      }
+      setSaved({
+        title: editing ? 'Saved' : mode === 'INCOME' ? 'Income logged' : 'Logged',
+        subtitle: `${mode === 'EXPENSE' ? '−' : mode === 'INCOME' ? '+' : ''}${prefs.currency} ${formatAmount(numericAmount)}${
+          mode === 'TRANSFER' ? '' : categoryLabel ? ` · ${categoryLabel}` : ''
+        }`,
+      });
     } catch (e) {
-      Alert.alert('Could not save', e instanceof Error ? e.message : 'Unknown error');
+      toast.error('Could not save', e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setBusy(false);
     }
   };
 
+  // Leaves the sheet once the success mark has played, and repeats it as a toast so the
+  // confirmation is still there on the screen you land back on.
+  const finishSave = () => {
+    const done = saved;
+    setSaved(null);
+    router.back();
+    if (done) toast.success(done.title, done.subtitle);
+  };
+
   const remove = () => {
     if (!editing) return;
-    Alert.alert(
-      'Delete transaction?',
-      editing.transferGroupId ? 'Both sides of this transfer will be removed.' : undefined,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              if (editing.transferGroupId) {
-                await mutate((t) => api.deleteTransfer(t, editing.transferGroupId!));
-              } else {
-                await mutate((t) => api.deleteTransaction(t, editing.id));
-              }
-              router.back();
-            } catch (e) {
-              Alert.alert('Could not delete', e instanceof Error ? e.message : 'Unknown error');
-            }
-          },
+    void confirmDestructive(
+      {
+        title: 'Delete this transaction?',
+        message: editing.transferGroupId
+          ? 'Both sides of this transfer will be removed.'
+          : 'This cannot be undone.',
+        confirmLabel: 'Delete',
+      },
+      () =>
+        editing.transferGroupId
+          ? mutate((t) => api.deleteTransfer(t, editing.transferGroupId!))
+          : mutate((t) => api.deleteTransaction(t, editing.id)),
+      {
+        onSuccess: () => {
+          router.back();
+          toast.success('Transaction deleted');
         },
-      ],
+        onError: (message) => toast.error('Could not delete', message),
+      },
     );
   };
 
@@ -399,6 +421,15 @@ export default function Entry() {
           )}
         </Pressable>
       </View>
+
+      {saved ? (
+        <SuccessBurst
+          title={saved.title}
+          subtitle={saved.subtitle}
+          tone={mode === 'EXPENSE' ? 'neutral' : 'positive'}
+          onDone={finishSave}
+        />
+      ) : null}
     </Screen>
   );
 }

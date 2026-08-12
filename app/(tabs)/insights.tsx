@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -19,6 +18,8 @@ import { BarSeries, MonthColumns, RankedBars } from '../../src/components/charts
 import { useApp } from '../../src/store';
 import { api } from '../../src/api';
 import { INSIGHT_CARDS, TIMEFRAMES, usePreferences, useTheme } from '../../src/preferences';
+import { useToast } from '../../src/components/Toast';
+import { useDestructiveAction } from '../../src/components/ConfirmDialog';
 import {
   accountDelta,
   categoryBreakdown,
@@ -268,6 +269,8 @@ function Budgets({
 }) {
   const theme = useTheme();
   const { prefs } = usePreferences();
+  const toast = useToast();
+  const confirmDestructive = useDestructiveAction();
   const [adding, setAdding] = useState(false);
   const [category, setCategory] = useState<string | null>(null);
   const [limit, setLimit] = useState('');
@@ -289,23 +292,25 @@ function Budgets({
       setAdding(false);
       setCategory(null);
       setLimit('');
+      toast.success('Budget set', `${category} · ${prefs.currency} ${formatAmount(value)}`);
     } catch (e) {
-      Alert.alert('Could not add budget', e instanceof Error ? e.message : 'Unknown error');
+      toast.error('Could not add budget', e instanceof Error ? e.message : 'Unknown error');
     }
   };
 
   const remove = (id: string, label: string) =>
-    Alert.alert('Remove budget?', label, [
-      { text: 'Cancel', style: 'cancel' },
+    void confirmDestructive(
       {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () =>
-          mutate((t) => api.deleteBudget(t, id)).catch((e) =>
-            Alert.alert('Could not remove', e instanceof Error ? e.message : 'Unknown error'),
-          ),
+        title: 'Remove this budget?',
+        message: `${label} will no longer be tracked. Its transactions are not affected.`,
+        confirmLabel: 'Remove',
       },
-    ]);
+      () => mutate((t) => api.deleteBudget(t, id)),
+      {
+        onSuccess: () => toast.success('Budget removed', label),
+        onError: (message) => toast.error('Could not remove', message),
+      },
+    );
 
   return (
     <>

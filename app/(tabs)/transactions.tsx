@@ -17,6 +17,7 @@ import { TransactionRow } from '../../src/components/TransactionRow';
 import { useApp } from '../../src/store';
 import { formatAmount, groupByDay, isTransfer, signOf } from '../../src/format';
 import { resolveRange } from '../../src/analytics';
+import { useDeleteTransaction } from '../../src/actions';
 import type { Timeframe } from '../../src/preferences';
 import { radius, space, type } from '../../src/theme';
 import { usePreferences, useTheme } from '../../src/preferences';
@@ -35,6 +36,7 @@ export default function Transactions() {
   const router = useRouter();
   const { accounts, categories, transactions, refreshing, refresh } = useApp();
   const { prefs } = usePreferences();
+  const deleteTransaction = useDeleteTransaction();
 
   // Arriving from a category bar in Insights pre-fills the search.
   const { q } = useLocalSearchParams<{ q?: string }>();
@@ -221,6 +223,7 @@ export default function Transactions() {
             accountName={accountById.get(item.userAccountId ?? '')}
             showAccount={accounts.length > 1 && accountFilter === null}
             onPress={() => router.push({ pathname: '/entry', params: { id: item.id } })}
+            onDelete={() => deleteTransaction(item)}
           />
         )}
         ListEmptyComponent={

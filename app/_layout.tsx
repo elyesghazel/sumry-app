@@ -14,6 +14,8 @@ import { AppProvider, useApp } from '../src/store';
 import { PreferencesProvider, useTheme } from '../src/preferences';
 import { Screen } from '../src/components/Screen';
 import { LockGate } from '../src/components/LockGate';
+import { ToastProvider } from '../src/components/Toast';
+import { ConfirmProvider } from '../src/components/ConfirmDialog';
 
 /**
  * Keeps the visible route in step with the session: an expired token drops you on the
@@ -62,29 +64,34 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <PreferencesProvider>
-          <AppProvider>
-          <AuthGate>
-            <LockGate>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: 'transparent' },
-              }}
-            >
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="sign-in" />
-              <Stack.Screen
-                name="entry"
-                options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-              />
-              <Stack.Screen name="settings/categories" />
-              <Stack.Screen name="settings/category" options={{ presentation: 'modal' }} />
-              <Stack.Screen name="settings/password" options={{ presentation: 'modal' }} />
-              <Stack.Screen name="settings/insights" />
-            </Stack>
-            </LockGate>
-            </AuthGate>
-          </AppProvider>
+          {/* Toasts and confirmations sit above every route, so they wrap the navigator. */}
+          <ToastProvider>
+            <ConfirmProvider>
+              <AppProvider>
+                <AuthGate>
+                  <LockGate>
+                    <Stack
+                      screenOptions={{
+                        headerShown: false,
+                        contentStyle: { backgroundColor: 'transparent' },
+                      }}
+                    >
+                      <Stack.Screen name="(tabs)" />
+                      <Stack.Screen name="sign-in" />
+                      <Stack.Screen
+                        name="entry"
+                        options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+                      />
+                      <Stack.Screen name="settings/categories" />
+                      <Stack.Screen name="settings/category" options={{ presentation: 'modal' }} />
+                      <Stack.Screen name="settings/password" options={{ presentation: 'modal' }} />
+                      <Stack.Screen name="settings/insights" />
+                    </Stack>
+                  </LockGate>
+                </AuthGate>
+              </AppProvider>
+            </ConfirmProvider>
+          </ToastProvider>
         </PreferencesProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

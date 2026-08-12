@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -19,6 +18,7 @@ import { Glass } from '../../src/components/Glass';
 import { useApp } from '../../src/store';
 import { api } from '../../src/api';
 import { useTheme } from '../../src/preferences';
+import { useToast } from '../../src/components/Toast';
 import { radius, space, type } from '../../src/theme';
 
 const MIN_LENGTH = 8;
@@ -28,6 +28,7 @@ export default function ChangePassword() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { token } = useApp();
+  const toast = useToast();
 
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -47,8 +48,8 @@ export default function ChangePassword() {
     try {
       await api.changePassword(token, current, next);
       // The existing token stays valid, so there is nothing to re-authenticate.
-      Alert.alert('Password changed', 'Use your new password next time you sign in.');
       router.back();
+      toast.success('Password changed', 'Use your new password next time you sign in.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not change password');
     } finally {
