@@ -76,6 +76,7 @@ export default function Entry() {
   const [note, setNote] = useState(editing?.description ?? '');
   const [date, setDate] = useState(() => (editing ? new Date(editing.date) : new Date()));
   const [showPicker, setShowPicker] = useState(false);
+  const [noteFocused, setNoteFocused] = useState(false);
   const [busy, setBusy] = useState(false);
   // Set once the write has landed; the burst owns the screen until it dismisses itself.
   const [saved, setSaved] = useState<{ title: string; subtitle: string } | null>(null);
@@ -261,14 +262,49 @@ export default function Entry() {
       </View>
 
       {/* Amount */}
-      <View style={styles.amountRow}>
+      <View
+        style={[styles.amountRow, noteFocused ? { paddingVertical: space.md } : null]}
+      >
         <Text style={[type.body, { color: theme.textFaint, marginBottom: 10 }]}>
           {prefs.currency}
         </Text>
-        <Text style={[type.display, { color: amountColor, fontSize: 52 }]} numberOfLines={1}>
+        <Text
+          style={[type.display, { color: amountColor, fontSize: noteFocused ? 36 : 52 }]}
+          numberOfLines={1}
+        >
           {mode === 'EXPENSE' ? '−' : mode === 'INCOME' ? '+' : ''}
           {amount}
         </Text>
+      </View>
+
+      {/* Note. Pinned here rather than at the foot of the scroller: it is the one field
+          that needs the text keyboard, and down there the keyboard covered it. */}
+      <View
+        style={[
+          styles.noteRow,
+          {
+            backgroundColor: theme.keypad,
+            borderColor: noteFocused ? theme.text : theme.hairline,
+          },
+        ]}
+      >
+        <Ionicons name="create-outline" size={18} color={theme.textFaint} />
+        <TextInput
+          value={note}
+          onChangeText={setNote}
+          onFocus={() => setNoteFocused(true)}
+          onBlur={() => setNoteFocused(false)}
+          placeholder="What was it for?"
+          placeholderTextColor={theme.textFaint}
+          returnKeyType="done"
+          submitBehavior="blurAndSubmit"
+          style={[styles.note, { color: theme.text }]}
+        />
+        {note ? (
+          <Pressable onPress={() => setNote('')} hitSlop={10}>
+            <Ionicons name="close-circle" size={18} color={theme.textFaint} />
+          </Pressable>
+        ) : null}
       </View>
 
       <ScrollView
@@ -383,24 +419,10 @@ export default function Entry() {
             />
           ) : null}
         </View>
-
-        <View style={styles.block}>
-          <Label text="Note" />
-          <TextInput
-            value={note}
-            onChangeText={setNote}
-            placeholder="Optional"
-            placeholderTextColor={theme.textFaint}
-            style={[
-              styles.note,
-              { color: theme.text, backgroundColor: theme.keypad, borderColor: theme.hairline },
-            ]}
-          />
-        </View>
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + space.md }]}>
-        <Keypad onKey={(k) => setAmount((a) => applyKey(a, k))} />
+        {noteFocused ? null : <Keypad onKey={(k) => setAmount((a) => applyKey(a, k))} />}
         <Pressable
           onPress={save}
           disabled={!canSave}
@@ -540,12 +562,20 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  note: {
+  noteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    marginHorizontal: space.lg,
+    marginBottom: space.lg,
+    paddingHorizontal: space.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: radius.md,
-    paddingHorizontal: space.md,
-    paddingVertical: space.md,
-    fontSize: 15,
+  },
+  note: {
+    flex: 1,
+    paddingVertical: space.md + 2,
+    fontSize: 17,
   },
   footer: { paddingHorizontal: space.lg, gap: space.md },
   save: {
