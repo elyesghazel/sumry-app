@@ -39,7 +39,7 @@ export default function Insights() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { prefs, set, tick, mask } = usePreferences();
-  const { accounts, categories, transactions, budgets, progress, refreshing, refresh, mutate } =
+  const { accounts, categories, transactions, budgets, progress, refreshing, refresh, mutate, forecast, subscriptions } =
     useApp();
 
   const range = useMemo(() => resolveRange(prefs.timeframe), [prefs.timeframe]);
@@ -155,6 +155,50 @@ export default function Insights() {
                 }
               />
             </View>
+          </Card>
+        ) : null}
+
+        {show('forecast') && forecast ? <Section title="Month end" /> : null}
+        {show('forecast') && forecast ? (
+          <Card>
+            <View style={{ gap: 6 }}>
+              <KV label="Spent so far" value={mask(formatAmount(forecast.spentSoFar), 'all')} />
+              <KV label="Still planned" value={mask(formatAmount(forecast.plannedExpensesRemaining), 'all')} />
+              <KV label={`Everyday · ${forecast.daysLeft} days × ${formatAmount(forecast.baselineDailyPace)}`} value={mask(formatAmount(forecast.baselineDailyPace * forecast.daysLeft), 'all')} />
+              <KV label="Projected spend" value={mask(formatAmount(forecast.projectedSpend), 'all')} strong />
+              <KV
+                label="Projected net"
+                value={`${forecast.projectedNet < 0 ? '−' : '+'}${mask(formatAmount(forecast.projectedNet))}`}
+                color={forecast.projectedNet < 0 ? theme.negative : theme.positive}
+              />
+              <Text style={[type.caption, { color: theme.textFaint, marginTop: 4 }]}>
+                {forecast.verdict === 'over' ? 'ABOVE' : forecast.verdict === 'under' ? 'BELOW' : 'ON'} THE LAST THREE MONTHS · LAST MONTH {formatAmount(forecast.lastMonthSpend)}
+              </Text>
+            </View>
+          </Card>
+        ) : null}
+
+        {show('subscriptions') && subscriptions ? <Section title="Subscriptions" /> : null}
+        {show('subscriptions') && subscriptions ? (
+          <Card>
+            {subscriptions.subscriptions.length ? (
+              <View style={{ gap: space.md }}>
+                {subscriptions.subscriptions.filter((x) => x.active).slice(0, 8).map((x) => (
+                  <View key={x.name} style={styles.rowBetween}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>{x.name}</Text>
+                      <Text style={[type.caption, { color: theme.textFaint }]}>{x.interval.toLowerCase()} · {x.occurrences}×{x.planned ? ' · planned' : ''}</Text>
+                    </View>
+                    <Text style={[type.amount, { color: theme.text }]}>{mask(formatAmount(x.monthlyEquivalent), 'all')}<Text style={[type.caption, { color: theme.textFaint }]}> /mo</Text></Text>
+                  </View>
+                ))}
+                <Text style={[type.caption, { color: theme.textFaint }]}>
+                  {subscriptions.activeCount} ACTIVE · {formatAmount(subscriptions.monthlyTotal)} A MONTH · {formatAmount(subscriptions.yearlyTotal)} A YEAR
+                </Text>
+              </View>
+            ) : (
+              <Empty text="Nothing recurring found yet." />
+            )}
           </Card>
         ) : null}
 
@@ -318,9 +362,12 @@ function Budgets({
         <Card>
           <View style={{ gap: space.lg }}>
             {budgets.map((b) => {
-              const spent = progressByLabel.get(b.categoryLabel)?.spentAmount ?? 0;
-              const pct = b.limitAmount > 0 ? spent / b.limitAmount : 1;
+              const prog = progressByLabel.get(b.categoryLabel);
+              const spent = prog?.spentAmount ?? 0;
+              const limit = prog?.effectiveLimit ?? b.limitAmount;
+              const pct = limit > 0 ? spent / limit : 1;
               const over = pct > 1;
+              const hot = prog?.pace === 'over';
               return (
                 <Pressable key={b.id} onLongPress={() => remove(b.id, b.categoryLabel)}>
                   <View style={styles.rowBetween}>
@@ -328,7 +375,7 @@ function Budgets({
                       {b.categoryLabel}
                     </Text>
                     <Text style={[type.label, { color: over ? theme.negative : theme.textMuted }]}>
-                      {formatAmount(spent)} / {formatAmount(b.limitAmount)} {prefs.currency}
+                      {formatAmount(spent)} / {formatAmount(limit)} {prefs.currency}
                     </Text>
                   </View>
                   <View style={[styles.track, { backgroundColor: theme.keypad, marginTop: 6 }]}>
@@ -337,19 +384,17 @@ function Budgets({
                         width: `${Math.max(2, Math.min(100, pct * 100))}%`,
                         height: '100%',
                         borderRadius: radius.pill,
-                        backgroundColor: over
-                          ? theme.negative
-                          : pct > 0.8
-                            ? theme.accent
-                            : theme.positive,
+                        backgroundColor: over ? theme.negative : hot ? theme.accent : theme.text,
                       }}
                     />
                   </View>
-                  {over ? (
-                    <Text style={[type.caption, { color: theme.negative, marginTop: 4 }]}>
-                      {formatAmount(spent - b.limitAmount)} over
-                    </Text>
-                  ) : null}
+                  <Text style={[type.caption, { color: over ? theme.negative : theme.textFaint, marginTop: 4 }]}>
+                    {over
+                      ? `${formatAmount(spent - limit)} over`
+                      : prog
+                        ? `${prog.daysLeft} days left · ${formatAmount(prog.perDayLeft)}/day${prog.carry ? ` · ${prog.carry > 0 ? '+' : '−'}${formatAmount(prog.carry)} carried` : ''}`
+                        : ''}
+                  </Text>
                 </Pressable>
               );
             })}
@@ -411,6 +456,16 @@ function Budgets({
       )}
       {budgets.length ? <Hint text="Long-press a budget to remove it." /> : null}
     </>
+  );
+}
+
+function KV({ label, value, strong, color }: { label: string; value: string; strong?: boolean; color?: string }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.rowBetween}>
+      <Text style={[strong ? type.label : type.body, { color: strong ? theme.text : theme.textMuted, flex: 1 }]}>{label}</Text>
+      <Text style={[type.amount, { color: color ?? theme.text, fontSize: strong ? 19 : 15 }]}>{value}</Text>
+    </View>
   );
 }
 

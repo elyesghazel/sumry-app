@@ -1,9 +1,8 @@
 import React from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
 import { radius, space } from '../../src/theme';
 import { usePreferences, useTheme } from '../../src/preferences';
 
@@ -32,22 +31,11 @@ export default function TabsLayout() {
             position: 'absolute',
             height: barHeight,
             paddingBottom: insets.bottom,
-            backgroundColor:
-              Platform.OS === 'android' ? theme.bgElevated : 'transparent',
+            backgroundColor: theme.bgElevated,
             borderTopWidth: StyleSheet.hairlineWidth,
             borderTopColor: theme.hairline,
             elevation: 0,
           },
-          tabBarBackground:
-            Platform.OS === 'ios'
-              ? () => (
-                  <BlurView
-                    intensity={40}
-                    tint={theme.blurTint}
-                    style={StyleSheet.absoluteFill}
-                  />
-                )
-              : undefined,
         }}
       >
         <Tabs.Screen
@@ -117,7 +105,7 @@ export default function TabsLayout() {
           },
         ]}
       >
-        <Ionicons name="add" size={28} color={theme.bg} />
+        <Ionicons name="add" size={28} color={theme.bgElevated} />
       </Pressable>
     </View>
   );

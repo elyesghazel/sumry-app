@@ -1,6 +1,6 @@
 import { Account, Transaction } from './api';
 import { Timeframe } from './preferences';
-import { isTransfer, signOf, startOfDay } from './format';
+import { baseOf, isTransfer, signOf, startOfDay } from './format';
 
 export type Range = { from: Date; to: Date; label: string; days: number };
 
@@ -66,8 +66,8 @@ export function totals(transactions: Transaction[], range: Range): Totals {
   for (const tx of transactions) {
     if (isTransfer(tx.kind) || !inRange(tx, range)) continue;
     count++;
-    if (signOf(tx.kind) > 0) income += tx.amount;
-    else expense += tx.amount;
+    if (signOf(tx.kind) > 0) income += baseOf(tx);
+    else expense += baseOf(tx);
   }
   return { income, expense, net: income - expense, count };
 }
@@ -134,7 +134,7 @@ export function spendBuckets(transactions: Transaction[], range: Range): Bucket[
   for (const tx of transactions) {
     if (isTransfer(tx.kind) || signOf(tx.kind) > 0 || !inRange(tx, range)) continue;
     const bucket = buckets.get(makeKey(new Date(tx.date)));
-    if (bucket) bucket.value += tx.amount;
+    if (bucket) bucket.value += baseOf(tx);
   }
 
   return [...buckets.values()];
@@ -152,7 +152,7 @@ export function categoryBreakdown(
     if (isTransfer(tx.kind) || signOf(tx.kind) > 0 || !inRange(tx, range)) continue;
     const label = tx.categoryLabel ?? 'Uncategorised';
     const entry = totalsByLabel.get(label) ?? { value: 0, count: 0 };
-    entry.value += tx.amount;
+    entry.value += baseOf(tx);
     entry.count += 1;
     totalsByLabel.set(label, entry);
   }
@@ -188,8 +188,8 @@ export function monthlySeries(transactions: Transaction[], months: number): Mont
     const d = new Date(tx.date);
     const point = index.get(`${d.getFullYear()}-${d.getMonth()}`);
     if (!point) continue;
-    if (signOf(tx.kind) > 0) point.income += tx.amount;
-    else point.expense += tx.amount;
+    if (signOf(tx.kind) > 0) point.income += baseOf(tx);
+    else point.expense += baseOf(tx);
   }
 
   return points;
@@ -208,7 +208,7 @@ export function frequentDescriptions(
     if (!label) continue;
     const entry = map.get(label) ?? { count: 0, total: 0 };
     entry.count += 1;
-    entry.total += tx.amount;
+    entry.total += baseOf(tx);
     map.set(label, entry);
   }
   return [...map.entries()]

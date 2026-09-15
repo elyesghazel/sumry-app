@@ -5,16 +5,27 @@ Built for fast logging: open, type an amount, tap a category, done.
 
 ## Design
 
-Calm over clutter. The palette is almost monochrome and colour carries exactly one meaning —
-which way money moved. Category colours exist but only ever appear as a small icon tint,
-never as a filled block, so a screen full of numbers stays readable.
+The ledger: paper, ink and hairlines. Figures and titles are set in Fraunces, everything
+else in Inter with tabular numerals. The palette is near-monochrome and colour carries
+exactly one meaning — which way money moved. Category colours exist but only ever appear
+as a small swatch, never as a filled block, so a screen full of numbers stays readable.
+Light is the primary palette; dark is its own set and follows the system unless overridden.
 
-Glass (`src/components/Glass.tsx`) is used on the few surfaces that genuinely float: the
-summary cards, the tab bar and the entry sheet. Android falls back to a flat tinted panel,
-because `expo-blur` needs a `BlurTargetView` wrapper there and a half-working blur reads as
-a bug rather than a style.
+Nothing floats and nothing blurs: panels are a slightly lighter sheet with a hairline.
 
-Both colour schemes are supported and follow the system setting.
+## What it does
+
+- **Overview** — safe to spend before the next planned income, where the month is heading,
+  what is due next (book overdue items with a tap), budgets at a glance, accounts, recent.
+- **Entry** — the keypad, plus a quick line: type `12.50 kebab cash yesterday` and the form
+  fills itself; the server parses it so phone and web agree.
+- **Plan** — planned items (rent, salary, savings transfer) with one-tap or automatic
+  booking, savings goals with contributions, subscriptions detected from history.
+- **Budgets** — envelopes with a period, a start day (payday) and rollover; progress shows
+  pace against elapsed time.
+- **Insights** — month-end forecast and subscriptions cards join the existing ones.
+- **Settings** — sign out ends the session on the server; "sign out everywhere" revokes
+  every device; a password change hands this device a fresh token.
 
 ## Running it
 
@@ -46,7 +57,9 @@ app/                 expo-router routes
   _layout.tsx        providers + session gate
   sign-in.tsx
   entry.tsx          add/edit — the keypad screen, presented as a modal
-  (tabs)/            overview, transactions, budgets, settings
+  plan.tsx           planned items, goals, subscriptions
+  budgets.tsx        envelopes with periods and rollover
+  (tabs)/            overview, transactions, insights, settings
 src/
   api.ts             typed backend client
   store.tsx          session + data, held in one context

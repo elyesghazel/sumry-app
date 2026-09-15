@@ -16,7 +16,9 @@ import {
   spendBuckets,
   totals,
 } from '../../src/analytics';
-import { formatAmount } from '../../src/format';
+import { formatAmount, relativeDays } from '../../src/format';
+import { api } from '../../src/api';
+import { useToast } from '../../src/components/Toast';
 import { useDeleteTransaction } from '../../src/actions';
 import { categoryColor, radius, space, type } from '../../src/theme';
 
@@ -25,7 +27,8 @@ export default function Overview() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { prefs, set, tick, hidden, reveal, mask } = usePreferences();
-  const { accounts, categories, transactions, refreshing, refresh, error } = useApp();
+  const { accounts, categories, transactions, refreshing, refresh, error, safe, forecast, upcoming, progress, mutate } = useApp();
+  const toast = useToast();
   const deleteTransaction = useDeleteTransaction();
 
   const range = useMemo(() => resolveRange(prefs.timeframe), [prefs.timeframe]);
@@ -40,9 +43,22 @@ export default function Overview() {
   );
 
   const netWorth = useMemo(
-    () => accounts.reduce((sum, a) => sum + (a.currentBalance ?? 0), 0),
+    () => accounts.reduce((sum, a) => sum + (a.baseBalance ?? a.currentBalance ?? 0), 0),
     [accounts],
   );
+
+  const soon = useMemo(() => upcoming.filter((o) => !o.overdue).slice(0, 5), [upcoming]);
+  const overdue = useMemo(() => upcoming.filter((o) => o.overdue), [upcoming]);
+
+  const bookNow = async (id: string, name: string) => {
+    tick();
+    try {
+      await mutate((t) => api.bookPlanned(t, id));
+      toast.success('Booked', name);
+    } catch (e) {
+      toast.error('Could not book', e instanceof Error ? e.message : 'Unknown error');
+    }
+  };
 
   const periodTotals = useMemo(() => totals(transactions, range), [transactions, range]);
 
@@ -88,11 +104,11 @@ export default function Overview() {
           <Text style={[type.label, styles.error, { color: theme.negative }]}>{error}</Text>
         ) : null}
 
-        {/* Net worth — the one number worth showing large. */}
+        {/* Safe to spend — what is actually free before the next planned income. */}
         <View style={styles.hero}>
           <Pressable onPress={cycleTimeframe} hitSlop={8} style={styles.timeframeRow}>
             <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
-              Total balance
+              {safe ? 'Safe to spend' : 'Total balance'}
             </Text>
             <View style={[styles.timeframeChip, { backgroundColor: theme.keypad }]}>
               <Text style={[type.caption, { color: theme.textMuted }]}>{range.label}</Text>
@@ -100,7 +116,7 @@ export default function Overview() {
             </View>
           </Pressable>
 
-          {/* Tapping the balance reveals it; it re-hides as soon as the app is backgrounded. */}
+          {/* Tapping the figure reveals it; it re-hides as soon as the app is backgrounded. */}
           <Pressable
             onPress={() => {
               if (prefs.privacy !== 'off') {
@@ -112,10 +128,16 @@ export default function Overview() {
             accessibilityRole={prefs.privacy !== 'off' ? 'button' : undefined}
             accessibilityLabel={hidden ? 'Balance hidden, tap to reveal' : undefined}
           >
-            <Text style={[type.display, { color: theme.text }]}>
-              {mask(formatAmount(netWorth))}
+            <Text
+              style={[
+                type.display,
+                { color: safe && safe.safeToSpend < 0 ? theme.negative : theme.text },
+              ]}
+            >
+              {safe && safe.safeToSpend < 0 ? '−' : ''}
+              {mask(formatAmount(safe ? safe.safeToSpend : netWorth))}
             </Text>
-            <Text style={[type.body, { color: theme.textFaint, marginBottom: 8 }]}>
+            <Text style={[type.label, { color: theme.textFaint, marginBottom: 10 }]}>
               {' '}
               {prefs.currency}
             </Text>
@@ -129,20 +151,153 @@ export default function Overview() {
             ) : null}
           </Pressable>
 
-          <View style={{ marginTop: space.xs }}>
-            {hidden ? (
-              <Text style={[type.label, { color: theme.textFaint }]}>
-                Hidden · tap to show
+          {hidden ? (
+            <Text style={[type.label, { color: theme.textFaint }]}>Hidden · tap to show</Text>
+          ) : safe ? (
+            <View style={{ gap: 2 }}>
+              <Text style={[type.label, { color: theme.textMuted }]}>
+                {formatAmount(safe.perDay)} a day for {safe.daysToHorizon} days · until{' '}
+                {relativeDays(safe.horizon)}
               </Text>
-            ) : (
-              <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
-            )}
-          </View>
+              <Text style={[type.caption, { color: theme.textFaint }]}>
+                {formatAmount(safe.balance)} on hand − {formatAmount(safe.upcomingExpenses)} committed
+                {' · '}net worth {formatAmount(netWorth)}
+              </Text>
+              <View style={{ marginTop: 4 }}>
+                <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
+              </View>
+            </View>
+          ) : (
+            <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
+          )}
         </View>
+
+        {/* Where the month is heading, in three lines. */}
+        {forecast ? (
+          <Glass style={styles.card}>
+            <View style={styles.cardInner}>
+              <View style={styles.cardHead}>
+                <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
+                  Month end
+                </Text>
+                <Text
+                  style={[
+                    type.caption,
+                    {
+                      color:
+                        forecast.verdict === 'over'
+                          ? theme.negative
+                          : forecast.verdict === 'under'
+                            ? theme.positive
+                            : theme.textFaint,
+                    },
+                  ]}
+                >
+                  {forecast.verdict === 'over' ? 'ABOVE USUAL' : forecast.verdict === 'under' ? 'BELOW USUAL' : 'ON THE USUAL'}
+                </Text>
+              </View>
+              <Line label="Spent so far" value={mask(formatAmount(forecast.spentSoFar), 'all')} />
+              <Line label="Still planned" value={mask(formatAmount(forecast.plannedExpensesRemaining), 'all')} />
+              <Line
+                label={`Everyday, ${forecast.daysLeft} days × ${formatAmount(forecast.baselineDailyPace)}`}
+                value={mask(formatAmount(forecast.baselineDailyPace * forecast.daysLeft), 'all')}
+              />
+              <Line label="Projected spend" value={mask(formatAmount(forecast.projectedSpend), 'all')} strong />
+              <Line
+                label="Projected net"
+                value={`${forecast.projectedNet < 0 ? '−' : '+'}${mask(formatAmount(forecast.projectedNet))}`}
+                color={forecast.projectedNet < 0 ? theme.negative : theme.positive}
+              />
+            </View>
+          </Glass>
+        ) : null}
+
+        {/* What is due next; overdue items can be booked from here. */}
+        {overdue.length || soon.length ? (
+          <>
+            <SectionHeading title="Upcoming" action="Plan" onAction={() => router.push('/plan')} />
+            <Glass style={styles.card}>
+              <View style={{ paddingVertical: space.xs }}>
+                {[...overdue, ...soon].map((o, i) => (
+                  <View key={`${o.plannedId}-${o.date}`}>
+                    {i > 0 ? <View style={[styles.divider, { backgroundColor: theme.hairline, marginLeft: space.lg }]} /> : null}
+                    <View style={styles.upRow}>
+                      <Text
+                        style={[type.caption, { color: o.overdue ? theme.negative : theme.textFaint, width: 64 }]}
+                        numberOfLines={1}
+                      >
+                        {o.overdue ? 'OVERDUE' : relativeDays(o.date).toUpperCase()}
+                      </Text>
+                      <Text style={[type.body, { color: theme.text, flex: 1 }]} numberOfLines={1}>
+                        {o.name}
+                      </Text>
+                      <Text
+                        style={[
+                          type.amount,
+                          { color: o.kind === 'INCOME' ? theme.positive : theme.text },
+                        ]}
+                      >
+                        {o.kind === 'INCOME' ? '+' : o.kind === 'TRANSFER_OUT' ? '' : '−'}
+                        {mask(formatAmount(o.amount), 'all')}
+                      </Text>
+                      {!o.autoBook && (o.overdue || o.date <= new Date().toISOString().slice(0, 10)) ? (
+                        <Pressable
+                          onPress={() => bookNow(o.plannedId, o.name)}
+                          hitSlop={6}
+                          style={[styles.bookBtn, { borderColor: theme.hairlineStrong }]}
+                        >
+                          <Text style={[type.caption, { color: theme.text }]}>BOOK</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </Glass>
+          </>
+        ) : null}
+
+        {/* Budgets at a glance. */}
+        {progress.length ? (
+          <>
+            <SectionHeading title="Budgets" action="All" onAction={() => router.push('/budgets')} />
+            <Glass style={styles.card}>
+              <View style={[styles.cardInner, { gap: space.md }]}>
+                {progress.slice(0, 4).map((p) => {
+                  const ratio = p.effectiveLimit > 0 ? p.spentAmount / p.effectiveLimit : 1;
+                  return (
+                    <View key={p.budgetId}>
+                      <View style={styles.flowHeader}>
+                        <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
+                          {p.categoryLabel}
+                        </Text>
+                        <Text style={[type.label, { color: p.pace === 'over' ? theme.negative : theme.textMuted }]}>
+                          {mask(formatAmount(p.spentAmount), 'all')} / {formatAmount(p.effectiveLimit)}
+                        </Text>
+                      </View>
+                      <View style={[styles.track, { backgroundColor: theme.keypad, height: 4 }]}>
+                        <View
+                          style={[
+                            styles.fill,
+                            {
+                              width: `${Math.max(2, Math.min(100, ratio * 100))}%`,
+                              backgroundColor:
+                                p.pace === 'over' ? theme.negative : p.pace === 'on' ? theme.accent : theme.text,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </Glass>
+          </>
+        ) : null}
 
         {/* Spending shape over the window. */}
         {trend.some((v) => v > 0) ? (
-          <Glass style={styles.card}>
+          <Glass style={[styles.card, { marginTop: space.md }]}>
             <View style={styles.cardInner}>
               <View style={styles.cardHead}>
                 <Text
@@ -194,6 +349,7 @@ export default function Overview() {
                 <View style={styles.accountInner}>
                   <Text style={[type.label, { color: theme.textMuted }]} numberOfLines={1}>
                     {a.accountName}
+                    {a.currency && a.currency !== prefs.currency ? ` · ${a.currency}` : ''}
                   </Text>
                   <Text style={[type.amount, { color: theme.text, fontSize: 19, marginTop: 6 }]}>
                     {mask(formatAmount(a.currentBalance ?? 0))}
@@ -288,6 +444,28 @@ function FlowBar({
   );
 }
 
+function Line({
+  label,
+  value,
+  strong,
+  color,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+  color?: string;
+}) {
+  const theme = useTheme();
+  return (
+    <View style={[styles.flowHeader, { marginBottom: 0, paddingVertical: 5 }]}>
+      <Text style={[strong ? type.label : type.body, { color: strong ? theme.text : theme.textMuted, flex: 1 }]}>
+        {label}
+      </Text>
+      <Text style={[type.amount, { color: color ?? theme.text, fontSize: strong ? 19 : 15 }]}>{value}</Text>
+    </View>
+  );
+}
+
 function SectionHeading({
   title,
   action,
@@ -357,5 +535,7 @@ const styles = StyleSheet.create({
   accountAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   accountInner: { padding: space.lg },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: 64 },
+  upRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
+  bookBtn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 4 },
   empty: { alignItems: 'center', paddingVertical: space.xl },
 });

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -32,7 +32,7 @@ export default function Entry() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { accounts, categories, transactions, mutate } = useApp();
+  const { accounts, categories, transactions, mutate, token } = useApp();
   const { prefs } = usePreferences();
   const toast = useToast();
   const confirmDestructive = useDestructiveAction();
@@ -82,6 +82,43 @@ export default function Entry() {
   const [saved, setSaved] = useState<{ title: string; subtitle: string } | null>(null);
 
   const numericAmount = Number.parseFloat(amount || '0');
+
+  // Quick entry: a sentence like "12.50 kebab cash yesterday" fills the form in one go.
+  // Parsed on the server (debounced) so the phone and the web agree on the reading.
+  const [quick, setQuick] = useState('');
+  const [quickHint, setQuickHint] = useState<string | null>(null);
+  const quickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (editing || !token || !quick.trim()) {
+      setQuickHint(null);
+      return;
+    }
+    if (quickTimer.current) clearTimeout(quickTimer.current);
+    quickTimer.current = setTimeout(async () => {
+      try {
+        const r = await api.quick(token, quick, false);
+        const p = r.parsed;
+        if (p.kind === 'TRANSFER_OUT') {
+          setMode('TRANSFER');
+          if (p.accountId) setFromId(p.accountId);
+          if (p.toAccountId) setToId(p.toAccountId);
+        } else {
+          setMode(p.kind === 'INCOME' ? 'INCOME' : 'EXPENSE');
+          if (p.categoryLabel) setCategoryLabel(p.categoryLabel);
+          if (p.accountId) setAccountId(p.accountId);
+        }
+        if (p.amount !== null) setAmount(p.amount.toFixed(2).replace(/\.00$/, ''));
+        if (p.description && p.description !== p.categoryLabel) setNote(p.description);
+        setDate(new Date(`${p.date}T12:00:00`));
+        setQuickHint(r.ready ? 'Ready — tap the tick to book' : `Missing: ${r.missing.join(', ')}`);
+      } catch {
+        setQuickHint(null);
+      }
+    }, 320);
+    return () => {
+      if (quickTimer.current) clearTimeout(quickTimer.current);
+    };
+  }, [quick, token, editing]);
 
   const visibleCategories = useMemo(
     () =>
@@ -234,6 +271,39 @@ export default function Entry() {
           <View style={{ width: 24 }} />
         )}
       </View>
+
+      {/* Quick entry, only for new entries: typing beats tapping when you know what it was. */}
+      {!editing ? (
+        <View style={{ paddingHorizontal: space.lg, marginBottom: space.sm }}>
+          <View
+            style={[
+              styles.noteRow,
+              { marginHorizontal: 0, marginBottom: 0, backgroundColor: theme.bgElevated, borderColor: quick ? theme.hairlineStrong : theme.hairline },
+            ]}
+          >
+            <Ionicons name="flash-outline" size={18} color={theme.accent} />
+            <TextInput
+              value={quick}
+              onChangeText={setQuick}
+              placeholder="Type it: 12.50 kebab cash yesterday"
+              placeholderTextColor={theme.textFaint}
+              returnKeyType="done"
+              autoCorrect={false}
+              style={[styles.note, { color: theme.text }]}
+            />
+            {quick ? (
+              <Pressable onPress={() => setQuick('')} hitSlop={10}>
+                <Ionicons name="close-circle" size={18} color={theme.textFaint} />
+              </Pressable>
+            ) : null}
+          </View>
+          {quickHint ? (
+            <Text style={[type.caption, { color: quickHint.startsWith('Ready') ? theme.positive : theme.textFaint, marginTop: 6, marginLeft: 4 }]}>
+              {quickHint}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* Type switch */}
       <View style={[styles.segment, { backgroundColor: theme.keypad }]}>

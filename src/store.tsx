@@ -14,7 +14,13 @@ import {
   Budget,
   BudgetProgress,
   Category,
+  Forecast,
+  Goal,
   Me,
+  Occurrence,
+  Planned,
+  SafeToSpend,
+  Subscriptions,
   Transaction,
   api,
 } from './api';
@@ -33,13 +39,22 @@ type Ctx = {
   transactions: Transaction[];
   budgets: Budget[];
   progress: BudgetProgress[];
+  planned: Planned[];
+  upcoming: Occurrence[];
+  safe: SafeToSpend | null;
+  goals: Goal[];
+  forecast: Forecast | null;
+  subscriptions: Subscriptions | null;
 
   refreshing: boolean;
   error: string | null;
 
   signIn: (email: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
-  signOut: () => Promise<void>;
+  /** Ends this session on the server too; `everywhere` invalidates every device. */
+  signOut: (everywhere?: boolean) => Promise<void>;
+  /** Swaps the stored token, e.g. after a password change hands back a new one. */
+  adoptToken: (token: string) => Promise<void>;
   refresh: () => Promise<void>;
   /** Runs an authenticated call, then re-reads everything the change could have touched. */
   mutate: <T>(fn: (token: string) => Promise<T>) => Promise<T>;
@@ -60,6 +75,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [progress, setProgress] = useState<BudgetProgress[]>([]);
+  const [planned, setPlanned] = useState<Planned[]>([]);
+  const [upcoming, setUpcoming] = useState<Occurrence[]>([]);
+  const [safe, setSafe] = useState<SafeToSpend | null>(null);
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [forecast, setForecast] = useState<Forecast | null>(null);
+  const [subscriptions, setSubscriptions] = useState<Subscriptions | null>(null);
 
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,28 +94,45 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setTransactions([]);
     setBudgets([]);
     setProgress([]);
+    setPlanned([]);
+    setUpcoming([]);
+    setSafe(null);
+    setGoals([]);
+    setForecast(null);
+    setSubscriptions(null);
     setStatus('signed-out');
   }, []);
 
   const loadAll = useCallback(
     async (t: string) => {
       setRefreshing(true);
-      const now = new Date();
       try {
-        const [acc, cat, tx, bud, prog, remote] = await Promise.all([
+        const [acc, cat, tx, bud, prog, remote, plan, up, sts, gls, fc, subs] = await Promise.all([
           api.accounts(t),
           api.categories(t),
           api.transactions(t),
           api.budgets(t),
-          api.budgetProgress(t, now.getMonth() + 1, now.getFullYear()),
-          // Preferences are nice-to-have: a failure here must not blank the dashboard.
+          api.budgetProgress(t),
+          // Everything below is nice-to-have: a failure there must not blank the dashboard.
           api.preferences(t).catch(() => null),
+          api.planned(t).catch(() => [] as Planned[]),
+          api.upcoming(t).catch(() => [] as Occurrence[]),
+          api.safeToSpend(t).catch(() => null),
+          api.goals(t).catch(() => [] as Goal[]),
+          api.forecast(t).catch(() => null),
+          api.subscriptions(t).catch(() => null),
         ]);
         setAccounts(acc);
         setCategories(cat.filter((c) => c.isActive !== false));
         setTransactions(tx);
         setBudgets(bud);
         setProgress(prog);
+        setPlanned(plan);
+        setUpcoming(up);
+        setSafe(sts);
+        setGoals(gls);
+        setForecast(fc);
+        setSubscriptions(subs);
         if (remote) {
           applyRemote({
             themeMode: remote.theme as never,
@@ -175,6 +213,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (token) await loadAll(token);
   }, [token, loadAll]);
 
+  const signOut = useCallback(
+    async (everywhere = false) => {
+      if (token) {
+        // Best effort: the local token is dropped whatever the server says.
+        await (everywhere ? api.logoutEverywhere(token) : api.logout(token)).catch(() => {});
+      }
+      await clearSession();
+    },
+    [token, clearSession],
+  );
+
+  const adoptToken = useCallback(async (t: string) => {
+    await SecureStore.setItemAsync(TOKEN_KEY, t);
+    setToken(t);
+  }, []);
+
   const mutate = useCallback(
     async <T,>(fn: (t: string) => Promise<T>): Promise<T> => {
       if (!token) throw new ApiError(401, 'Not signed in');
@@ -195,11 +249,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       transactions,
       budgets,
       progress,
+      planned,
+      upcoming,
+      safe,
+      goals,
+      forecast,
+      subscriptions,
       refreshing,
       error,
       signIn,
       register,
-      signOut: clearSession,
+      signOut,
+      adoptToken,
       refresh,
       mutate,
     }),
@@ -212,11 +273,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       transactions,
       budgets,
       progress,
+      planned,
+      upcoming,
+      safe,
+      goals,
+      forecast,
+      subscriptions,
       refreshing,
       error,
       signIn,
       register,
-      clearSession,
+      signOut,
+      adoptToken,
       refresh,
       mutate,
     ],

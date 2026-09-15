@@ -20,6 +20,8 @@ export const TIMEFRAMES: { key: Timeframe; label: string }[] = [
 /** Analytics cards the user can switch on and off, in display order. */
 export const INSIGHT_CARDS = [
   { key: 'summary', label: 'Summary' },
+  { key: 'forecast', label: 'Month end' },
+  { key: 'subscriptions', label: 'Subscriptions' },
   { key: 'trend', label: 'Spending over time' },
   { key: 'categories', label: 'By category' },
   { key: 'months', label: 'Month comparison' },
@@ -67,7 +69,7 @@ const DEFAULTS: Preferences = {
   defaultAccountId: null,
   haptics: true,
   timeframe: '30d',
-  cards: ['summary', 'trend', 'categories', 'months', 'accounts', 'budgets', 'top'],
+  cards: ['summary', 'forecast', 'subscriptions', 'trend', 'categories', 'months', 'accounts', 'budgets', 'top'],
   showRunningBalance: false,
   groupByDay: true,
 };

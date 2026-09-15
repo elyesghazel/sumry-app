@@ -80,3 +80,17 @@ export function groupByDay(transactions: Transaction[]): DaySection[] {
 
 export const sameMonth = (a: Date, b: Date): boolean =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+
+/** The amount a transaction counts for in reports: its base-currency value. */
+export const baseOf = (tx: { amount: number; baseAmount?: number | null }): number =>
+  tx.baseAmount ?? tx.amount;
+
+/** "in 3 days", "tomorrow", "2 days ago". */
+export function relativeDays(iso: string, today = startOfDay(new Date())): string {
+  const d = startOfDay(new Date(`${iso.slice(0, 10)}T12:00:00`));
+  const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (diff === 0) return 'today';
+  if (diff === 1) return 'tomorrow';
+  if (diff === -1) return 'yesterday';
+  return diff > 0 ? `in ${diff} days` : `${-diff} days ago`;
+}

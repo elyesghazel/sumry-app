@@ -19,6 +19,10 @@ export type Account = {
   userId: string | null;
   accountName: string;
   currentBalance: number;
+  currency: string;
+  /** The balance in the user's base currency at today's rate. */
+  baseBalance: number;
+  baseCurrency: string;
 };
 
 export type Category = {
@@ -45,21 +49,178 @@ export type Transaction = {
   userId: string | null;
   balanceBefore: number | null;
   balanceAfter: number | null;
+  currency: string;
+  fxRate: number;
+  /** The amount in the user's base currency — what reports add up. */
+  baseAmount: number;
 };
+
+export type BudgetPeriod = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
 
 export type Budget = {
   id: string;
   limitAmount: number;
   categoryLabel: string;
   categoryColor: string | null;
+  period: BudgetPeriod;
+  rollover: boolean;
+  startDay: number;
 };
 
 export type BudgetProgress = {
+  budgetId: string;
   categoryLabel: string;
+  categoryColor: string | null;
   limitAmount: number;
   spentAmount: number;
   remaining: number;
   percentage: number;
+  period: BudgetPeriod;
+  periodStart: string;
+  periodEnd: string;
+  daysLeft: number;
+  rollover: boolean;
+  carry: number;
+  effectiveLimit: number;
+  pace: 'under' | 'on' | 'over';
+  perDayLeft: number;
+};
+
+export type Frequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY' | 'ONCE';
+
+export type Planned = {
+  id: string;
+  name: string;
+  amount: number;
+  description: string | null;
+  startDate: string;
+  endDate: string | null;
+  frequency: Frequency;
+  kind: TransactionKind;
+  categoryLabel: string | null;
+  categoryColor: string | null;
+  accountId: string;
+  accountName: string;
+  toAccountId: string | null;
+  toAccountName: string | null;
+  autoBook: boolean;
+  isActive: boolean;
+  lastBookedOn: string | null;
+  nextDate: string | null;
+  monthlyEquivalent: number;
+};
+
+export type Occurrence = {
+  plannedId: string;
+  name: string;
+  amount: number;
+  kind: TransactionKind;
+  date: string;
+  categoryLabel: string | null;
+  categoryColor: string | null;
+  accountId: string;
+  accountName: string;
+  currency: string;
+  toAccountName: string | null;
+  autoBook: boolean;
+  overdue: boolean;
+};
+
+export type SafeToSpend = {
+  balance: number;
+  accountId: string | null;
+  today: string;
+  horizon: string;
+  daysToHorizon: number;
+  horizonReason: string;
+  upcomingExpenses: number;
+  upcomingTransfersOut: number;
+  safeToSpend: number;
+  perDay: number;
+  upcoming: Occurrence[];
+};
+
+export type Goal = {
+  id: string;
+  name: string;
+  targetAmount: number;
+  targetDate: string | null;
+  accountId: string | null;
+  accountName: string | null;
+  current: number;
+  remaining: number;
+  percentage: number;
+  monthsLeft: number | null;
+  requiredPerMonth: number | null;
+  onTrack: boolean | null;
+  achieved: boolean;
+  color: string | null;
+  icon: string | null;
+  isActive: boolean;
+  createdAt: string;
+};
+
+export type Subscription = {
+  name: string;
+  interval: 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+  medianAmount: number;
+  monthlyEquivalent: number;
+  occurrences: number;
+  lastDate: string;
+  nextExpected: string;
+  active: boolean;
+  categoryLabel: string | null;
+  categoryColor: string | null;
+  accountId: string | null;
+  accountName: string | null;
+  planned: boolean;
+};
+
+export type Subscriptions = {
+  subscriptions: Subscription[];
+  activeCount: number;
+  monthlyTotal: number;
+  yearlyTotal: number;
+};
+
+export type Forecast = {
+  monthStart: string;
+  monthEnd: string;
+  today: string;
+  daysElapsed: number;
+  daysLeft: number;
+  spentSoFar: number;
+  incomeSoFar: number;
+  plannedExpensesRemaining: number;
+  plannedIncomeRemaining: number;
+  baselineDailyPace: number;
+  currentDailyPace: number;
+  projectedSpend: number;
+  projectedIncome: number;
+  projectedNet: number;
+  lastMonthSpend: number;
+  sameMonthLastYearSpend: number;
+  verdict: 'under' | 'on' | 'over';
+};
+
+export type QuickEntry = {
+  parsed: {
+    amount: number | null;
+    description: string;
+    date: string;
+    kind: TransactionKind;
+    accountId: string | null;
+    accountName: string | null;
+    toAccountId: string | null;
+    toAccountName: string | null;
+    categoryLabel: string | null;
+    categoryColor: string | null;
+    categorySource: 'explicit' | 'rule' | null;
+  };
+  missing: string[];
+  ready: boolean;
+  booked: Transaction | null;
+  transferGroupId: string | null;
 };
 
 export type Me = { id: string; username: string; email: string };
@@ -140,10 +301,10 @@ export const api = {
 
   accounts: (token: string) => request<Account[]>('/api/users/accounts/', { token }),
 
-  createAccount: (token: string, accountName: string, currentBalance: number) =>
-    request<Account>('/api/users/accounts', { token, body: { accountName, currentBalance } }),
+  createAccount: (token: string, accountName: string, currentBalance: number, currency = 'CHF') =>
+    request<Account>('/api/users/accounts', { token, body: { accountName, currentBalance, currency } }),
 
-  updateAccount: (token: string, id: string, patch: { accountName?: string; currentBalance?: number }) =>
+  updateAccount: (token: string, id: string, patch: { accountName?: string; currentBalance?: number; currency?: string }) =>
     request<Account>(`/api/users/accounts/${id}`, { token, body: patch, method: 'PUT' }),
 
   deleteAccount: (token: string, id: string) =>
@@ -156,12 +317,18 @@ export const api = {
       method: 'PUT',
     }),
 
+  /** Returns a fresh token: every other session is invalidated by the change. */
   changePassword: (token: string, currentPassword: string, newPassword: string) =>
-    request<void>('/api/users/password', {
+    request<{ token: string; email: string }>('/api/users/password', {
       token,
       body: { currentPassword, newPassword },
       method: 'PUT',
     }),
+
+  logout: (token: string) => request<void>('/api/users/logout', { token, method: 'POST', body: {} }),
+
+  logoutEverywhere: (token: string) =>
+    request<void>('/api/users/logout-all', { token, method: 'POST', body: {} }),
 
   categories: (token: string) => request<Category[]>('/api/category/user', { token }),
 
@@ -254,15 +421,70 @@ export const api = {
 
   budgets: (token: string) => request<Budget[]>('/api/budgets', { token }),
 
-  budgetProgress: (token: string, month: number, year: number) =>
-    request<BudgetProgress[]>(`/api/budgets/progress?month=${month}&year=${year}`, { token }),
+  /** Progress for the period containing today (or `date`, ISO day). */
+  budgetProgress: (token: string, date?: string) =>
+    request<BudgetProgress[]>(`/api/budgets/progress${date ? `?date=${date}` : ''}`, { token }),
 
-  createBudget: (token: string, categoryLabel: string, maxAmount: number) =>
-    request<Budget>('/api/budgets', { token, body: { categoryLabel, maxAmount } }),
+  createBudget: (
+    token: string,
+    categoryLabel: string,
+    maxAmount: number,
+    extra: { period?: BudgetPeriod; rollover?: boolean; startDay?: number } = {},
+  ) => request<Budget>('/api/budgets', { token, body: { categoryLabel, maxAmount, ...extra } }),
 
-  updateBudget: (token: string, id: string, limitAmount: number) =>
-    request<Budget>(`/api/budgets/${id}`, { token, body: { limitAmount }, method: 'PUT' }),
+  updateBudget: (
+    token: string,
+    id: string,
+    patch: { limitAmount?: number; period?: BudgetPeriod; rollover?: boolean; startDay?: number },
+  ) => request<Budget>(`/api/budgets/${id}`, { token, body: patch, method: 'PUT' }),
 
   deleteBudget: (token: string, id: string) =>
     request<void>(`/api/budgets/${id}`, { token, method: 'DELETE' }),
+
+  // ---- natural-language entry
+  quick: (token: string, text: string, book: boolean) =>
+    request<QuickEntry>('/api/transactions/quick', { token, body: { text, book } }),
+
+  // ---- planned
+  planned: (token: string) => request<Planned[]>('/api/planned', { token }),
+
+  createPlanned: (
+    token: string,
+    input: {
+      name: string; amount: number; startDate: string; frequency: Frequency;
+      categoryLabel?: string | null; accountId: string; toAccountId?: string | null; autoBook?: boolean;
+    },
+  ) => request<Planned>('/api/planned', { token, body: input }),
+
+  updatePlanned: (token: string, id: string, patch: { autoBook?: boolean; isActive?: boolean; amount?: number }) =>
+    request<Planned>(`/api/planned/${id}`, { token, body: patch, method: 'PUT' }),
+
+  deletePlanned: (token: string, id: string) =>
+    request<void>(`/api/planned/${id}`, { token, method: 'DELETE' }),
+
+  bookPlanned: (token: string, id: string) =>
+    request<Planned>(`/api/planned/${id}/book`, { token, method: 'POST', body: {} }),
+
+  upcoming: (token: string, days = 45) =>
+    request<Occurrence[]>(`/api/planned/upcoming?days=${days}`, { token }),
+
+  safeToSpend: (token: string) => request<SafeToSpend>('/api/planned/safe-to-spend', { token }),
+
+  // ---- goals
+  goals: (token: string) => request<Goal[]>('/api/goals', { token }),
+
+  createGoal: (
+    token: string,
+    input: { name: string; targetAmount: number; targetDate?: string | null; accountId?: string | null; savedAmount?: number | null },
+  ) => request<Goal>('/api/goals', { token, body: input }),
+
+  deleteGoal: (token: string, id: string) => request<void>(`/api/goals/${id}`, { token, method: 'DELETE' }),
+
+  contributeGoal: (token: string, id: string, amount: number, fromAccountId?: string | null) =>
+    request<Goal>(`/api/goals/${id}/contribute`, { token, body: { amount, fromAccountId: fromAccountId ?? null } }),
+
+  // ---- insights
+  subscriptions: (token: string) => request<Subscriptions>('/api/insights/subscriptions', { token }),
+
+  forecast: (token: string) => request<Forecast>('/api/insights/forecast', { token }),
 };

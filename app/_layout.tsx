@@ -3,13 +3,14 @@ import { ActivityIndicator, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useFonts } from 'expo-font';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import {
-  Figtree_300Light,
-  Figtree_400Regular,
-  Figtree_500Medium,
-  Figtree_600SemiBold,
-  useFonts,
-} from '@expo-google-fonts/figtree';
+  Fraunces_300Light,
+  Fraunces_400Regular,
+  Fraunces_500Medium,
+  Fraunces_500Medium_Italic,
+} from '@expo-google-fonts/fraunces';
 import { AppProvider, useApp } from '../src/store';
 import { PreferencesProvider, useTheme } from '../src/preferences';
 import { Screen } from '../src/components/Screen';
@@ -51,13 +52,16 @@ function Splash() {
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    Figtree_300Light,
-    Figtree_400Regular,
-    Figtree_500Medium,
-    Figtree_600SemiBold,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Fraunces_300Light,
+    Fraunces_400Regular,
+    Fraunces_500Medium,
+    Fraunces_500Medium_Italic,
   });
 
-  // Holding the first frame avoids a visible reflow from the system face to Figtree.
+  // Holding the first frame avoids a visible reflow from the system face to the real ones.
   if (!fontsLoaded) return null;
 
   return (
@@ -86,6 +90,8 @@ export default function RootLayout() {
                       <Stack.Screen name="settings/category" options={{ presentation: 'modal' }} />
                       <Stack.Screen name="settings/password" options={{ presentation: 'modal' }} />
                       <Stack.Screen name="settings/insights" />
+                      <Stack.Screen name="plan" />
+                      <Stack.Screen name="budgets" />
                     </Stack>
                   </LockGate>
                 </AuthGate>

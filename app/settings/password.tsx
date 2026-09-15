@@ -21,13 +21,13 @@ import { useTheme } from '../../src/preferences';
 import { useToast } from '../../src/components/Toast';
 import { radius, space, type } from '../../src/theme';
 
-const MIN_LENGTH = 8;
+const MIN_LENGTH = 12;
 
 export default function ChangePassword() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { token } = useApp();
+  const { token, adoptToken } = useApp();
   const toast = useToast();
 
   const [current, setCurrent] = useState('');
@@ -46,10 +46,11 @@ export default function ChangePassword() {
     setBusy(true);
     setError(null);
     try {
-      await api.changePassword(token, current, next);
-      // The existing token stays valid, so there is nothing to re-authenticate.
+      const fresh = await api.changePassword(token, current, next);
+      // The change revokes every token issued before it; this device continues on the new one.
+      await adoptToken(fresh.token);
       router.back();
-      toast.success('Password changed', 'Use your new password next time you sign in.');
+      toast.success('Password changed', 'Other devices were signed out.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not change password');
     } finally {

@@ -395,6 +395,20 @@ export default function Settings() {
         </Group>
         <Hint text="Long-press an account to delete it." />
 
+        <Group title="Plan">
+          <LinkRow
+            icon="calendar-outline"
+            label="Planned & goals"
+            onPress={() => router.push('/plan')}
+          />
+          <Divider />
+          <LinkRow
+            icon="pie-chart-outline"
+            label="Budgets"
+            onPress={() => router.push('/budgets')}
+          />
+        </Group>
+
         <Group title="Organise">
           <LinkRow
             icon="pricetags-outline"
@@ -468,6 +482,22 @@ export default function Settings() {
           style={[styles.footerAction, { borderColor: theme.hairline, marginTop: space.sm }]}
         >
           <Text style={[type.label, { color: theme.negative }]}>Sign out</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={async () => {
+            const ok = await confirm({
+              title: 'Sign out everywhere?',
+              message: 'Every device — this one, the web, anything else — has to sign in again.',
+              confirmLabel: 'Sign out everywhere',
+              destructive: true,
+              icon: 'log-out-outline',
+            });
+            if (ok) void signOut(true);
+          }}
+          style={[styles.footerAction, { borderColor: theme.hairline, marginTop: space.sm }]}
+        >
+          <Text style={[type.label, { color: theme.textMuted }]}>Sign out everywhere</Text>
         </Pressable>
       </ScrollView>
     </Screen>

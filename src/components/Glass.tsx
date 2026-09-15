@@ -1,52 +1,35 @@
 import React from 'react';
-import { Platform, StyleSheet, View, ViewProps, ViewStyle } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { StyleSheet, View, ViewProps } from 'react-native';
 import { radius } from '../theme';
 import { useTheme } from '../preferences';
 
 type Props = ViewProps & {
-  /** `strong` is reserved for surfaces that float above content, like the entry sheet. */
+  /** Kept for callers; both variants are the same flat panel now. */
   variant?: 'plain' | 'strong';
   radiusSize?: number;
 };
 
 /**
- * A frosted surface — used sparingly. Blur is expensive and, applied everywhere, turns
- * into visual noise, so this wraps only the few surfaces that genuinely float: the
- * balance card, the tab bar and the amount sheet.
- *
- * Android's blur support is patchy across devices, so there it degrades to a flat tinted
- * panel that looks intentional rather than broken.
+ * A panel: raised paper with a hairline. The name is historical — this used to be a
+ * frosted surface. The ledger has no glass; things you can touch sit on a slightly
+ * lighter sheet, everything else is ruled directly onto the page.
  */
-export function Glass({ variant = 'plain', radiusSize = radius.lg, style, children, ...rest }: Props) {
+export function Glass({ radiusSize = radius.lg, style, children, ...rest }: Props) {
   const theme = useTheme();
-
-  const shell: ViewStyle = {
-    borderRadius: radiusSize,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.hairline,
-    overflow: 'hidden',
-  };
-
-  const fill = variant === 'strong' ? theme.glassStrong : theme.glass;
-
-  if (Platform.OS === 'android') {
-    return (
-      <View style={[shell, { backgroundColor: theme.bgElevated }, style]} {...rest}>
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} pointerEvents="none" />
-        {children}
-      </View>
-    );
-  }
-
   return (
-    <View style={[shell, style]} {...rest}>
-      <BlurView
-        intensity={variant === 'strong' ? 40 : 24}
-        tint={theme.blurTint}
-        style={StyleSheet.absoluteFill}
-      />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} pointerEvents="none" />
+    <View
+      style={[
+        {
+          borderRadius: radiusSize,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.hairline,
+          backgroundColor: theme.bgElevated,
+          overflow: 'hidden',
+        },
+        style,
+      ]}
+      {...rest}
+    >
       {children}
     </View>
   );
