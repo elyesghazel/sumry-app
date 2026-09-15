@@ -27,7 +27,7 @@ export default function Overview() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { prefs, set, tick, hidden, reveal, mask } = usePreferences();
-  const { accounts, categories, transactions, refreshing, refresh, error, safe, forecast, upcoming, progress, mutate } = useApp();
+  const { accounts, categories, transactions, refreshing, refresh, error, safe, forecast, upcoming, progress, planned, goals, mutate } = useApp();
   const toast = useToast();
   const deleteTransaction = useDeleteTransaction();
 
@@ -172,6 +172,13 @@ export default function Overview() {
           )}
         </View>
 
+        {/* Always reachable, whether or not anything is planned yet. */}
+        <View style={styles.shortcuts}>
+          <Shortcut icon="calendar-outline" label="Plan" hint={planned.length ? `${planned.length} planned` : 'rent, salary…'} onPress={() => router.push('/plan')} />
+          <Shortcut icon="pie-chart-outline" label="Budgets" hint={progress.length ? `${progress.length} set` : 'set a cap'} onPress={() => router.push('/budgets')} />
+          <Shortcut icon="flag-outline" label="Goals" hint={goals.length ? `${goals.length} saving` : 'save toward'} onPress={() => router.push('/plan')} />
+        </View>
+
         {/* Where the month is heading, in three lines. */}
         {forecast ? (
           <Glass style={styles.card}>
@@ -213,9 +220,9 @@ export default function Overview() {
         ) : null}
 
         {/* What is due next; overdue items can be booked from here. */}
+        <SectionHeading title="Upcoming" action={overdue.length || soon.length ? 'Plan' : 'Add a plan'} onAction={() => router.push('/plan')} />
         {overdue.length || soon.length ? (
           <>
-            <SectionHeading title="Upcoming" action="Plan" onAction={() => router.push('/plan')} />
             <Glass style={styles.card}>
               <View style={{ paddingVertical: space.xs }}>
                 {[...overdue, ...soon].map((o, i) => (
@@ -255,7 +262,13 @@ export default function Overview() {
               </View>
             </Glass>
           </>
-        ) : null}
+        ) : (
+          <Glass style={styles.card}>
+            <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>
+              Nothing planned yet. Add Lohn, Miete and your subscriptions under Plan — then this screen knows what is safe to spend before payday.
+            </Text>
+          </Glass>
+        )}
 
         {/* Budgets at a glance. */}
         {progress.length ? (
@@ -444,6 +457,22 @@ function FlowBar({
   );
 }
 
+function Shortcut({ icon, label, hint, onPress }: { icon: string; label: string; hint: string; onPress: () => void }) {
+  const theme = useTheme();
+  const { tick } = usePreferences();
+  return (
+    <Pressable
+      onPress={() => { tick(); onPress(); }}
+      style={({ pressed }) => [styles.shortcut, { borderColor: theme.hairline, backgroundColor: theme.bgElevated, opacity: pressed ? 0.7 : 1 }]}
+      accessibilityRole="button"
+    >
+      <Ionicons name={icon as never} size={18} color={theme.accent} />
+      <Text style={[type.label, { color: theme.text, marginTop: 6 }]}>{label}</Text>
+      <Text style={[type.caption, { color: theme.textFaint }]} numberOfLines={1}>{hint}</Text>
+    </Pressable>
+  );
+}
+
 function Line({
   label,
   value,
@@ -504,6 +533,8 @@ const styles = StyleSheet.create({
   },
   heroAmount: { flexDirection: 'row', alignItems: 'flex-end', marginTop: space.sm },
   card: { marginHorizontal: space.lg },
+  shortcuts: { flexDirection: 'row', gap: space.sm, paddingHorizontal: space.lg, marginBottom: space.md },
+  shortcut: { flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.lg, padding: space.md },
   cardInner: { padding: space.lg },
   cardHead: {
     flexDirection: 'row',
