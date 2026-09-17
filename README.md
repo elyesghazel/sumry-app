@@ -38,17 +38,47 @@ npx expo start
 For a device on your LAN, set `EXPO_PUBLIC_API_URL=http://<your-machine-ip>:48090` and run
 the backend's `compose.yaml`. `localhost` will not work from a phone.
 
-## Building an APK
+## Building
 
 ```bash
 npm install -g eas-cli
 eas login
+```
+
+Both platforms use the `preview` profile: an internal build that points at the deployed
+backend (`EXPO_PUBLIC_API_URL` in `eas.json`) and can be installed without a store.
+
+### Android
+
+```bash
 eas build --platform android --profile preview
 ```
 
-`preview` produces an installable APK (rather than the Play Store AAB that `production`
-builds). The build reads `.env.production`, so the resulting app points at the deployed
-backend. Download the artifact from the link EAS prints and sideload it.
+Produces an APK (rather than the Play Store AAB that `production` builds). Download it from
+the link EAS prints and sideload it.
+
+### iPhone
+
+Apple only lets signed apps onto a device, and signing needs an [Apple Developer Program](https://developer.apple.com/programs/)
+membership. With that in place:
+
+```bash
+eas device:create                          # once per phone: open the link on the iPhone
+eas build --platform ios --profile preview # ad-hoc build for the registered phones
+```
+
+`device:create` shows a QR code; opening it on the iPhone installs a profile that registers
+the phone's UDID. EAS then asks for the Apple ID on the first build and creates the
+certificate and provisioning profile itself. When the build finishes, open its link on the
+iPhone in Safari and tap **Install**. Ad-hoc builds stay valid for a year; a new phone means
+another `device:create` and a rebuild.
+
+For a longer-lived install that updates itself, submit the same build to TestFlight instead:
+`eas build --platform ios --profile production` followed by `eas submit --platform ios`.
+
+Without a developer membership the app still runs on an iPhone inside [Expo Go](https://apps.apple.com/app/expo-go/id982107779):
+`eas update --channel preview` publishes the JavaScript, and Expo Go (signed into the same
+Expo account) lists the project under *Projects*.
 
 ## Layout
 
