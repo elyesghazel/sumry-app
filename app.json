@@ -9,7 +9,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "ch.sumry.app"
+      "bundleIdentifier": "ch.sumry.app",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "ch.sumry.app",
@@ -29,6 +32,12 @@
       "expo-router",
       "expo-secure-store",
       "expo-font",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Sumry uses Face ID to unlock the app."
+        }
+      ],
       [
         "expo-splash-screen",
         {
