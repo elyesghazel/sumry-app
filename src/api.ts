@@ -469,6 +469,14 @@ export const api = {
   shortcutToken: (token: string) =>
     request<{ token: string; expiresAt: string }>('/api/users/shortcut-token', { token, method: 'POST', body: {} }),
 
+  /** Lets the next occurrence pass unbooked; `date` must be that occurrence. */
+  skipPlanned: (token: string, id: string, date: string) =>
+    request<Planned>(`/api/planned/${id}/skip?date=${date}`, { token, method: 'POST', body: {} }),
+
+  /** Moves the next occurrence to `to`; the move becomes a one-off plan on that date. */
+  postponePlanned: (token: string, id: string, date: string, to: string) =>
+    request<Planned>(`/api/planned/${id}/postpone?date=${date}&to=${to}`, { token, method: 'POST', body: {} }),
+
   upcoming: (token: string, days = 45) =>
     request<Occurrence[]>(`/api/planned/upcoming?days=${days}`, { token }),
 

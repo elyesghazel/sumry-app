@@ -39,6 +39,8 @@ export default function Overview() {
   const deleteTransaction = useDeleteTransaction();
   const [allBudgets, setAllBudgets] = useState(false);
   const [allPlanned, setAllPlanned] = useState(false);
+  // The planned row whose actions are open, as `${plannedId}-${date}`.
+  const [openPlan, setOpenPlan] = useState<string | null>(null);
 
   const range = useMemo(() => resolveRange(prefs.timeframe), [prefs.timeframe]);
 
@@ -123,6 +125,42 @@ export default function Overview() {
       toast.success('Booked', name);
     } catch (e) {
       toast.error('Could not book', e instanceof Error ? e.message : 'Unknown error');
+    }
+  };
+
+  // Only a plan's earliest unbooked occurrence can be skipped or moved.
+  const firstOfPlan = useMemo(() => {
+    const seen = new Set<string>();
+    const out = new Set<string>();
+    for (const o of plan.items) {
+      if (seen.has(o.plannedId)) continue;
+      seen.add(o.plannedId);
+      out.add(`${o.plannedId}-${o.date}`);
+    }
+    return out;
+  }, [plan.items]);
+
+  const skip = async (o: Occurrence) => {
+    tick();
+    try {
+      await mutate((t) => api.skipPlanned(t, o.plannedId, o.date));
+      setOpenPlan(null);
+      toast.success('Skipped', `${o.name} · ${dayLabel(o.date).toLowerCase()}`);
+    } catch (e) {
+      toast.error('Could not skip', e instanceof Error ? e.message : 'Unknown error');
+    }
+  };
+
+  const postpone = async (o: Occurrence, days: number) => {
+    tick();
+    const to = shiftIso(o.date, days);
+    const today = todayIso();
+    try {
+      await mutate((t) => api.postponePlanned(t, o.plannedId, o.date, to < today ? today : to));
+      setOpenPlan(null);
+      toast.success('Moved', `${o.name} → ${dayLabel(to < today ? today : to).toLowerCase()}`);
+    } catch (e) {
+      toast.error('Could not move', e instanceof Error ? e.message : 'Unknown error');
     }
   };
 
@@ -318,8 +356,11 @@ export default function Overview() {
                 const prev = shownPlan[i - 1];
                 const newDay = !prev || prev.date !== o.date || prev.overdue !== o.overdue;
                 const due = !o.autoBook && (o.overdue || o.date <= todayIso());
+                const key = `${o.plannedId}-${o.date}`;
+                const movable = firstOfPlan.has(key);
+                const open = openPlan === key;
                 return (
-                  <View key={`${o.plannedId}-${o.date}`}>
+                  <View key={key}>
                     {i > 0 ? (
                       <View
                         style={[
@@ -328,7 +369,12 @@ export default function Overview() {
                         ]}
                       />
                     ) : null}
-                    <View style={styles.upRow}>
+                    {/* Tap opens skip / move for the plan's next occurrence. */}
+                    <Pressable
+                      onPress={movable ? () => { tick(); setOpenPlan(open ? null : key); } : undefined}
+                      style={styles.upRow}
+                      accessibilityHint={movable ? 'Shows skip and move' : undefined}
+                    >
                       <Text
                         style={[type.caption, { color: o.overdue ? theme.negative : theme.textFaint, width: 72 }]}
                         numberOfLines={1}
@@ -362,7 +408,14 @@ export default function Overview() {
                           <Text style={[type.caption, { color: o.overdue ? theme.negative : theme.text }]}>BOOK</Text>
                         </Pressable>
                       ) : null}
-                    </View>
+                    </Pressable>
+                    {open ? (
+                      <View style={styles.planActions}>
+                        <PlanAction label="Skip" icon="play-skip-forward-outline" onPress={() => skip(o)} />
+                        <PlanAction label="+1 week" icon="arrow-forward-outline" onPress={() => postpone(o, 7)} />
+                        <PlanAction label="+1 month" icon="calendar-outline" onPress={() => postpone(o, 30)} />
+                      </View>
+                    ) : null}
                   </View>
                 );
               })}
@@ -483,6 +536,26 @@ function dayLabel(iso: string): string {
   return d
     .toLocaleDateString('en-GB', withinWeek ? { weekday: 'short', day: 'numeric' } : { day: 'numeric', month: 'short' })
     .toUpperCase();
+}
+
+function shiftIso(iso: string, days: number): string {
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function PlanAction({ label, icon, onPress }: { label: string; icon: string; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={4}
+      style={({ pressed }) => [styles.planAction, { borderColor: theme.hairlineStrong, opacity: pressed ? 0.6 : 1 }]}
+    >
+      <Ionicons name={icon as never} size={13} color={theme.textMuted} />
+      <Text style={[type.label, { color: theme.text }]}>{label}</Text>
+    </Pressable>
+  );
 }
 
 function BudgetRow({ p, color }: { p: BudgetProgress; color: string }) {
@@ -651,6 +724,16 @@ const styles = StyleSheet.create({
   accountRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
   divider: { height: StyleSheet.hairlineWidth },
   upRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
+  planActions: { flexDirection: 'row', gap: space.sm, paddingLeft: 96, paddingRight: space.lg, paddingBottom: space.md },
+  planAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.pill,
+    paddingHorizontal: space.md,
+    paddingVertical: 6,
+  },
   bookBtn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 4 },
   empty: { alignItems: 'center', paddingVertical: space.xl },
 });
