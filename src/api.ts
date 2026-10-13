@@ -465,6 +465,10 @@ export const api = {
   bookPlanned: (token: string, id: string) =>
     request<Planned>(`/api/planned/${id}/book`, { token, method: 'POST', body: {} }),
 
+  /** A year-long token for Apple Shortcuts that only reaches /api/shortcut. */
+  shortcutToken: (token: string) =>
+    request<{ token: string; expiresAt: string }>('/api/users/shortcut-token', { token, method: 'POST', body: {} }),
+
   upcoming: (token: string, days = 45) =>
     request<Occurrence[]>(`/api/planned/upcoming?days=${days}`, { token }),
 

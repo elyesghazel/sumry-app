@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,7 +23,7 @@ export default function Settings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { prefs, set, reset, mask } = usePreferences();
-  const { user, accounts, categories, transactions, signOut, mutate } = useApp();
+  const { user, accounts, categories, transactions, signOut, mutate, token } = useApp();
   const toast = useToast();
   const confirm = useConfirm();
   const confirmDestructive = useDestructiveAction();
@@ -408,6 +408,25 @@ export default function Settings() {
             onPress={() => router.push('/budgets')}
           />
         </Group>
+
+        {/* The token goes out through the share sheet: copy it, or AirDrop it to the Mac. */}
+        <Group title="Apple Pay shortcut">
+          <LinkRow
+            icon="logo-apple"
+            label="Create shortcut token"
+            value="valid 1 year"
+            onPress={async () => {
+              if (!token) return;
+              try {
+                const res = await api.shortcutToken(token);
+                await Share.share({ message: res.token });
+              } catch (e) {
+                toast.error('Could not create token', e instanceof Error ? e.message : 'Unknown error');
+              }
+            }}
+          />
+        </Group>
+        <Hint text="For the Wallet automation that logs Apple Pay payments. The token can only log entries and list categories; “Sign out everywhere” revokes it." />
 
         <Group title="Organise">
           <LinkRow
