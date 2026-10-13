@@ -32,6 +32,20 @@ export default function Budgets() {
 
   const byId = useMemo(() => new Map(progress.map((p) => [p.budgetId, p])), [progress]);
   const categoryByLabel = useMemo(() => new Map(categories.map((c) => [c.label, c])), [categories]);
+  // Overspent envelopes first, furthest over on top, then the rest by how full they are.
+  const sorted = useMemo(() => {
+    const fill = (b: Budget) => {
+      const p = byId.get(b.id);
+      return p && p.effectiveLimit > 0 ? p.spentAmount / p.effectiveLimit : 0;
+    };
+    const over = (b: Budget) => {
+      const p = byId.get(b.id);
+      return p ? p.spentAmount - p.effectiveLimit : 0;
+    };
+    return [...budgets].sort((a, b) =>
+      over(a) > 0 || over(b) > 0 ? over(b) - over(a) : fill(b) - fill(a),
+    );
+  }, [budgets, byId]);
 
   const remove = (b: Budget) =>
     void confirmDestructive(
@@ -61,7 +75,7 @@ export default function Budgets() {
           <Editor budget={editing === 'new' ? null : editing} onDone={() => setEditing(null)} onRemove={editing === 'new' ? undefined : () => remove(editing)} />
         ) : null}
 
-        {budgets.map((b) => {
+        {sorted.map((b) => {
           const p = byId.get(b.id);
           const ratio = p && p.effectiveLimit > 0 ? p.spentAmount / p.effectiveLimit : 0;
           const color = categoryColor(theme, b.categoryLabel, categoryByLabel.get(b.categoryLabel)?.color ?? b.categoryColor);
