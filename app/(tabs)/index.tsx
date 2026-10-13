@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,29 +7,38 @@ import { Screen } from '../../src/components/Screen';
 import { Glass } from '../../src/components/Glass';
 import { TransactionRow } from '../../src/components/TransactionRow';
 import { Delta } from '../../src/components/Delta';
-import { Sparkline } from '../../src/components/charts';
 import { useApp } from '../../src/store';
 import { usePreferences, useTheme, TIMEFRAMES } from '../../src/preferences';
-import {
-  accountDelta,
-  resolveRange,
-  spendBuckets,
-  totals,
-} from '../../src/analytics';
+import { accountDelta, resolveRange, totals } from '../../src/analytics';
 import { formatAmount, relativeDays } from '../../src/format';
-import { api } from '../../src/api';
+import { api, BudgetProgress, Occurrence } from '../../src/api';
 import { useToast } from '../../src/components/Toast';
 import { useDeleteTransaction } from '../../src/actions';
 import { categoryColor, radius, space, type } from '../../src/theme';
 
+// How far ahead the plan list looks, and how many rows each list shows before folding.
+const PLAN_DAYS = 30;
+const PLAN_ROWS = 6;
+const BUDGET_ROWS = 6;
+
+const overBy = (p: BudgetProgress) => p.spentAmount - p.effectiveLimit;
+const isOver = (p: BudgetProgress) => overBy(p) > 0.005;
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * The overview answers three questions in order: how much is free, am I over a budget,
+ * what is about to go out. The charts and the forecast breakdown live in Insights.
+ */
 export default function Overview() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { prefs, set, tick, hidden, reveal, mask } = usePreferences();
-  const { accounts, categories, transactions, refreshing, refresh, error, safe, forecast, upcoming, progress, planned, goals, mutate } = useApp();
+  const { accounts, categories, transactions, refreshing, refresh, error, safe, forecast, upcoming, progress, mutate } = useApp();
   const toast = useToast();
   const deleteTransaction = useDeleteTransaction();
+  const [allBudgets, setAllBudgets] = useState(false);
+  const [allPlanned, setAllPlanned] = useState(false);
 
   const range = useMemo(() => resolveRange(prefs.timeframe), [prefs.timeframe]);
 
@@ -47,8 +56,65 @@ export default function Overview() {
     [accounts],
   );
 
-  const soon = useMemo(() => upcoming.filter((o) => !o.overdue).slice(0, 5), [upcoming]);
-  const overdue = useMemo(() => upcoming.filter((o) => o.overdue), [upcoming]);
+  const periodTotals = useMemo(() => totals(transactions, range), [transactions, range]);
+
+  // Net movement across every account over the window — the change behind the headline.
+  const netChange = useMemo(
+    () => accounts.reduce((sum, a) => sum + accountDelta(a, transactions, range), 0),
+    [accounts, transactions, range],
+  );
+
+  // Worst first: overspent envelopes by how far over, then the rest by how full they are.
+  const budgets = useMemo(
+    () =>
+      [...progress].sort((a, b) => {
+        const oa = isOver(a);
+        const ob = isOver(b);
+        if (oa !== ob) return oa ? -1 : 1;
+        if (oa) return overBy(b) - overBy(a);
+        const ra = a.effectiveLimit > 0 ? a.spentAmount / a.effectiveLimit : 0;
+        const rb = b.effectiveLimit > 0 ? b.spentAmount / b.effectiveLimit : 0;
+        return rb - ra;
+      }),
+    [progress],
+  );
+  const overBudgets = useMemo(() => budgets.filter(isOver), [budgets]);
+  const overTotal = useMemo(() => overBudgets.reduce((s, p) => s + overBy(p), 0), [overBudgets]);
+  // Never fold away an overspent budget.
+  const budgetFold = Math.max(BUDGET_ROWS, overBudgets.length);
+  const shownBudgets = allBudgets ? budgets : budgets.slice(0, budgetFold);
+
+  // Overdue first, then everything due within the next month.
+  const plan = useMemo(() => {
+    const today = todayIso();
+    const horizon = new Date(Date.now() + PLAN_DAYS * 86_400_000).toISOString().slice(0, 10);
+    const overdue = upcoming.filter((o) => o.overdue);
+    const items = [...overdue, ...upcoming.filter((o) => !o.overdue && o.date <= horizon)];
+    const sum = (pred: (o: Occurrence) => boolean) =>
+      items.filter(pred).reduce((s, o) => s + o.amount, 0);
+    return {
+      items,
+      overdue: overdue.length,
+      toBook: items.filter((o) => !o.autoBook && (o.overdue || o.date <= today)).length,
+      income: sum((o) => o.kind === 'INCOME'),
+      out: sum((o) => o.kind !== 'INCOME'),
+    };
+  }, [upcoming]);
+  const planFold = Math.max(PLAN_ROWS, plan.overdue);
+  const shownPlan = allPlanned ? plan.items : plan.items.slice(0, planFold);
+
+  const nextIncome = useMemo(
+    () => (safe ? upcoming.find((o) => o.kind === 'INCOME' && o.date === safe.horizon) : undefined),
+    [safe, upcoming],
+  );
+
+  const recent = useMemo(
+    () =>
+      [...transactions]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .slice(0, 5),
+    [transactions],
+  );
 
   const bookNow = async (id: string, name: string) => {
     tick();
@@ -59,29 +125,6 @@ export default function Overview() {
       toast.error('Could not book', e instanceof Error ? e.message : 'Unknown error');
     }
   };
-
-  const periodTotals = useMemo(() => totals(transactions, range), [transactions, range]);
-
-  // Net movement across every account over the window — the change behind the headline.
-  const netChange = useMemo(
-    () => accounts.reduce((sum, a) => sum + accountDelta(a, transactions, range), 0),
-    [accounts, transactions, range],
-  );
-
-  const trend = useMemo(
-    () => spendBuckets(transactions, range).map((b) => b.value),
-    [transactions, range],
-  );
-
-  const recent = useMemo(
-    () =>
-      [...transactions]
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 6),
-    [transactions],
-  );
-
-  const flowMax = Math.max(periodTotals.income, periodTotals.expense, 1);
 
   const cycleTimeframe = () => {
     const i = TIMEFRAMES.findIndex((t) => t.key === prefs.timeframe);
@@ -153,197 +196,194 @@ export default function Overview() {
 
           {hidden ? (
             <Text style={[type.label, { color: theme.textFaint }]}>Hidden · tap to show</Text>
-          ) : safe ? (
+          ) : (
             <View style={{ gap: 2 }}>
-              <Text style={[type.label, { color: theme.textMuted }]}>
-                {formatAmount(safe.perDay)} a day for {safe.daysToHorizon} days · until{' '}
-                {relativeDays(safe.horizon)}
-              </Text>
-              <Text style={[type.caption, { color: theme.textFaint }]}>
-                {formatAmount(safe.balance)} on hand − {formatAmount(safe.upcomingExpenses)} committed
-                {' · '}net worth {formatAmount(netWorth)}
+              {safe ? (
+                <Text style={[type.label, { color: theme.textMuted }]}>
+                  {formatAmount(safe.perDay)} a day until {nextIncome ? `${nextIncome.name} ` : ''}
+                  {relativeDays(safe.horizon)}
+                </Text>
+              ) : null}
+              <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]}>
+                Net worth {formatAmount(netWorth)} · in {formatAmount(periodTotals.income)} · out{' '}
+                {formatAmount(periodTotals.expense)}
               </Text>
               <View style={{ marginTop: 4 }}>
                 <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
               </View>
             </View>
-          ) : (
-            <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
           )}
         </View>
 
-        {/* Always reachable, whether or not anything is planned yet. */}
-        <View style={styles.shortcuts}>
-          <Shortcut icon="calendar-outline" label="Plan" hint={planned.length ? `${planned.length} planned` : 'rent, salary…'} onPress={() => router.push('/plan')} />
-          <Shortcut icon="pie-chart-outline" label="Budgets" hint={progress.length ? `${progress.length} set` : 'set a cap'} onPress={() => router.push('/budgets')} />
-          <Shortcut icon="flag-outline" label="Goals" hint={goals.length ? `${goals.length} saving` : 'save toward'} onPress={() => router.push('/plan')} />
+        {/* Three verdicts, readable without scrolling; each opens its detail. */}
+        <View style={styles.tiles}>
+          <Tile
+            label="Budgets"
+            value={progress.length ? (overBudgets.length ? `${overBudgets.length} over` : 'On track') : 'None'}
+            hint={
+              progress.length
+                ? overBudgets.length
+                  ? `${mask(formatAmount(overTotal), 'all')} too much`
+                  : `${progress.length} envelopes`
+                : 'set a cap'
+            }
+            tone={overBudgets.length ? 'negative' : progress.length ? 'positive' : undefined}
+            onPress={() => router.push('/budgets')}
+          />
+          <Tile
+            label="Planned"
+            value={
+              plan.toBook
+                ? `${plan.toBook} to book`
+                : plan.items.length
+                  ? `−${mask(formatAmount(plan.out), 'all')}`
+                  : 'Nothing'
+            }
+            hint={plan.toBook ? 'due now' : plan.items.length ? `next ${PLAN_DAYS} days` : 'rent, salary…'}
+            tone={plan.overdue ? 'negative' : undefined}
+            onPress={() => router.push('/plan')}
+          />
+          <Tile
+            label="Month end"
+            value={
+              forecast
+                ? `${forecast.projectedNet < 0 ? '−' : '+'}${mask(formatAmount(forecast.projectedNet), 'all')}`
+                : '—'
+            }
+            hint={
+              forecast
+                ? forecast.verdict === 'over'
+                  ? 'above usual'
+                  : forecast.verdict === 'under'
+                    ? 'below usual'
+                    : 'about usual'
+                : 'no forecast yet'
+            }
+            tone={forecast ? (forecast.projectedNet < 0 ? 'negative' : 'positive') : undefined}
+            onPress={() => router.push('/insights')}
+          />
         </View>
 
-        {/* Where the month is heading, in three lines. */}
-        {forecast ? (
-          <Glass style={styles.card}>
-            <View style={styles.cardInner}>
-              <View style={styles.cardHead}>
-                <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
-                  Month end
-                </Text>
-                <Text
-                  style={[
-                    type.caption,
-                    {
-                      color:
-                        forecast.verdict === 'over'
-                          ? theme.negative
-                          : forecast.verdict === 'under'
-                            ? theme.positive
-                            : theme.textFaint,
-                    },
-                  ]}
-                >
-                  {forecast.verdict === 'over' ? 'ABOVE USUAL' : forecast.verdict === 'under' ? 'BELOW USUAL' : 'ON THE USUAL'}
-                </Text>
-              </View>
-              <Line label="Spent so far" value={mask(formatAmount(forecast.spentSoFar), 'all')} />
-              <Line label="Still planned" value={mask(formatAmount(forecast.plannedExpensesRemaining), 'all')} />
-              <Line
-                label={`Everyday, ${forecast.daysLeft} days × ${formatAmount(forecast.baselineDailyPace)}`}
-                value={mask(formatAmount(forecast.baselineDailyPace * forecast.daysLeft), 'all')}
-              />
-              <Line label="Projected spend" value={mask(formatAmount(forecast.projectedSpend), 'all')} strong />
-              <Line
-                label="Projected net"
-                value={`${forecast.projectedNet < 0 ? '−' : '+'}${mask(formatAmount(forecast.projectedNet))}`}
-                color={forecast.projectedNet < 0 ? theme.negative : theme.positive}
-              />
+        {/* Budgets, worst first, so an overspend is the first line of the card. */}
+        <SectionHeading
+          title="Budgets"
+          detail={progress.length ? `${overBudgets.length} of ${progress.length} over` : undefined}
+          detailColor={overBudgets.length ? theme.negative : undefined}
+          action={progress.length ? 'Edit' : 'Set one'}
+          onAction={() => router.push('/budgets')}
+        />
+        <Glass style={styles.card}>
+          {progress.length ? (
+            <View style={[styles.cardInner, { gap: space.md }]}>
+              {shownBudgets.map((p) => (
+                <BudgetRow
+                  key={p.budgetId}
+                  p={p}
+                  color={categoryColor(theme, p.categoryLabel, categoryByLabel.get(p.categoryLabel)?.color ?? p.categoryColor)}
+                />
+              ))}
+              {budgets.length > budgetFold ? (
+                <MoreToggle
+                  open={allBudgets}
+                  count={budgets.length - budgetFold}
+                  onPress={() => {
+                    tick();
+                    setAllBudgets((v) => !v);
+                  }}
+                />
+              ) : null}
             </View>
-          </Glass>
-        ) : null}
+          ) : (
+            <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>
+              No budgets yet. Put a cap on Essen gehen or Shopping and this card tells you the moment you pass it.
+            </Text>
+          )}
+        </Glass>
 
-        {/* What is due next; overdue items can be booked from here. */}
-        <SectionHeading title="Upcoming" action={overdue.length || soon.length ? 'Plan' : 'Add a plan'} onAction={() => router.push('/plan')} />
-        {overdue.length || soon.length ? (
-          <>
-            <Glass style={styles.card}>
-              <View style={{ paddingVertical: space.xs }}>
-                {[...overdue, ...soon].map((o, i) => (
+        {/* What is due in the next month; anything due and manual can be booked here. */}
+        <SectionHeading
+          title="Planned"
+          detail={
+            plan.items.length
+              ? `${plan.income ? `+${mask(formatAmount(plan.income), 'all')} · ` : ''}−${mask(formatAmount(plan.out), 'all')}`
+              : undefined
+          }
+          action={plan.items.length ? 'Plan' : 'Add a plan'}
+          onAction={() => router.push('/plan')}
+        />
+        <Glass style={styles.card}>
+          {plan.items.length ? (
+            <View style={{ paddingVertical: space.xs }}>
+              {shownPlan.map((o, i) => {
+                const prev = shownPlan[i - 1];
+                const newDay = !prev || prev.date !== o.date || prev.overdue !== o.overdue;
+                const due = !o.autoBook && (o.overdue || o.date <= todayIso());
+                return (
                   <View key={`${o.plannedId}-${o.date}`}>
-                    {i > 0 ? <View style={[styles.divider, { backgroundColor: theme.hairline, marginLeft: space.lg }]} /> : null}
+                    {i > 0 ? (
+                      <View
+                        style={[
+                          styles.divider,
+                          { backgroundColor: theme.hairline, marginLeft: newDay ? space.lg : 96 },
+                        ]}
+                      />
+                    ) : null}
                     <View style={styles.upRow}>
                       <Text
-                        style={[type.caption, { color: o.overdue ? theme.negative : theme.textFaint, width: 64 }]}
+                        style={[type.caption, { color: o.overdue ? theme.negative : theme.textFaint, width: 72 }]}
                         numberOfLines={1}
                       >
-                        {o.overdue ? 'OVERDUE' : relativeDays(o.date).toUpperCase()}
+                        {newDay ? (o.overdue ? 'OVERDUE' : dayLabel(o.date)) : ''}
                       </Text>
-                      <Text style={[type.body, { color: theme.text, flex: 1 }]} numberOfLines={1}>
-                        {o.name}
-                      </Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
+                          {o.name}
+                        </Text>
+                        <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
+                          {o.toAccountName ? `→ ${o.toAccountName}` : o.categoryLabel ?? o.accountName}
+                          {o.autoBook ? ' · auto' : ''}
+                        </Text>
+                      </View>
                       <Text
                         style={[
                           type.amount,
-                          { color: o.kind === 'INCOME' ? theme.positive : theme.text },
+                          { color: o.kind === 'INCOME' ? theme.positive : theme.text, fontSize: 15 },
                         ]}
                       >
-                        {o.kind === 'INCOME' ? '+' : o.kind === 'TRANSFER_OUT' ? '' : '−'}
+                        {o.kind === 'INCOME' ? '+' : '−'}
                         {mask(formatAmount(o.amount), 'all')}
                       </Text>
-                      {!o.autoBook && (o.overdue || o.date <= new Date().toISOString().slice(0, 10)) ? (
+                      {due ? (
                         <Pressable
                           onPress={() => bookNow(o.plannedId, o.name)}
                           hitSlop={6}
-                          style={[styles.bookBtn, { borderColor: theme.hairlineStrong }]}
+                          style={[styles.bookBtn, { borderColor: o.overdue ? theme.negative : theme.hairlineStrong }]}
                         >
-                          <Text style={[type.caption, { color: theme.text }]}>BOOK</Text>
+                          <Text style={[type.caption, { color: o.overdue ? theme.negative : theme.text }]}>BOOK</Text>
                         </Pressable>
                       ) : null}
                     </View>
                   </View>
-                ))}
-              </View>
-            </Glass>
-          </>
-        ) : (
-          <Glass style={styles.card}>
+                );
+              })}
+              {plan.items.length > planFold ? (
+                <View style={{ paddingHorizontal: space.lg, paddingVertical: space.sm }}>
+                  <MoreToggle
+                    open={allPlanned}
+                    count={plan.items.length - planFold}
+                    onPress={() => {
+                      tick();
+                      setAllPlanned((v) => !v);
+                    }}
+                  />
+                </View>
+              ) : null}
+            </View>
+          ) : (
             <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>
               Nothing planned yet. Add Lohn, Miete and your subscriptions under Plan — then this screen knows what is safe to spend before payday.
             </Text>
-          </Glass>
-        )}
-
-        {/* Budgets at a glance. */}
-        {progress.length ? (
-          <>
-            <SectionHeading title="Budgets" action="All" onAction={() => router.push('/budgets')} />
-            <Glass style={styles.card}>
-              <View style={[styles.cardInner, { gap: space.md }]}>
-                {progress.slice(0, 4).map((p) => {
-                  const ratio = p.effectiveLimit > 0 ? p.spentAmount / p.effectiveLimit : 1;
-                  return (
-                    <View key={p.budgetId}>
-                      <View style={styles.flowHeader}>
-                        <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
-                          {p.categoryLabel}
-                        </Text>
-                        <Text style={[type.label, { color: p.pace === 'over' ? theme.negative : theme.textMuted }]}>
-                          {mask(formatAmount(p.spentAmount), 'all')} / {formatAmount(p.effectiveLimit)}
-                        </Text>
-                      </View>
-                      <View style={[styles.track, { backgroundColor: theme.keypad, height: 4 }]}>
-                        <View
-                          style={[
-                            styles.fill,
-                            {
-                              width: `${Math.max(2, Math.min(100, ratio * 100))}%`,
-                              backgroundColor:
-                                p.pace === 'over' ? theme.negative : p.pace === 'on' ? theme.accent : theme.text,
-                            },
-                          ]}
-                        />
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            </Glass>
-          </>
-        ) : null}
-
-        {/* Spending shape over the window. */}
-        {trend.some((v) => v > 0) ? (
-          <Glass style={[styles.card, { marginTop: space.md }]}>
-            <View style={styles.cardInner}>
-              <View style={styles.cardHead}>
-                <Text
-                  style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}
-                >
-                  Spending
-                </Text>
-                <Text style={[type.amount, { color: theme.text, fontSize: 15 }]}>
-                  {mask(formatAmount(periodTotals.expense), 'all')}
-                </Text>
-              </View>
-              <Sparkline values={trend} color={theme.negative} />
-            </View>
-          </Glass>
-        ) : null}
-
-        {/* In vs out as two proportional bars — easier to read than two more numbers. */}
-        <Glass style={[styles.card, { marginTop: space.md }]}>
-          <View style={styles.cardInner}>
-            <FlowBar
-              label="In"
-              amount={periodTotals.income}
-              fraction={periodTotals.income / flowMax}
-              color={theme.positive}
-            />
-            <View style={{ height: space.lg }} />
-            <FlowBar
-              label="Out"
-              amount={periodTotals.expense}
-              fraction={periodTotals.expense / flowMax}
-              color={theme.negative}
-            />
-          </View>
+          )}
         </Glass>
 
         {/* Accounts, each with its movement over the window. */}
@@ -396,7 +436,7 @@ export default function Overview() {
             {recent.map((tx, i) => (
               <View key={tx.id}>
                 {i > 0 ? (
-                  <View style={[styles.divider, { backgroundColor: theme.hairline }]} />
+                  <View style={[styles.divider, { backgroundColor: theme.hairline, marginLeft: 64 }]} />
                 ) : null}
                 <TransactionRow
                   tx={tx}
@@ -423,93 +463,134 @@ export default function Overview() {
   );
 }
 
-function FlowBar({
-  label,
-  amount,
-  fraction,
-  color,
-}: {
-  label: string;
-  amount: number;
-  fraction: number;
-  color: string;
-}) {
+/** "TODAY", "TOMORROW", "FRI 23" within the week, "23 NOV" beyond it. */
+function dayLabel(iso: string): string {
+  const rel = relativeDays(iso);
+  if (rel === 'today' || rel === 'tomorrow') return rel.toUpperCase();
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  const withinWeek = d.getTime() - Date.now() < 6 * 86_400_000;
+  return d
+    .toLocaleDateString('en-GB', withinWeek ? { weekday: 'short', day: 'numeric' } : { day: 'numeric', month: 'short' })
+    .toUpperCase();
+}
+
+function BudgetRow({ p, color }: { p: BudgetProgress; color: string }) {
   const theme = useTheme();
   const { mask } = usePreferences();
+  const over = isOver(p);
+  const ratio = p.effectiveLimit > 0 ? p.spentAmount / p.effectiveLimit : 1;
+  // Red only once the cap is passed; amber while spending runs ahead of the calendar.
+  const fill = over ? theme.negative : p.pace === 'over' ? theme.accent : theme.text;
   return (
     <View>
-      <View style={styles.flowHeader}>
-        <View style={styles.flowLabel}>
+      <View style={styles.between}>
+        <View style={[styles.flowLabel, { flex: 1 }]}>
           <View style={[styles.swatch, { backgroundColor: color }]} />
-          <Text style={[type.label, { color: theme.textMuted }]}>{label}</Text>
+          <Text style={[type.body, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
+            {p.categoryLabel}
+          </Text>
         </View>
-        <Text style={[type.amount, { color: theme.text }]}>{mask(formatAmount(amount), 'all')}</Text>
+        <Text style={[type.label, { color: over ? theme.negative : theme.textMuted }]}>
+          {over
+            ? `${mask(formatAmount(overBy(p)), 'all')} over`
+            : `${mask(formatAmount(p.effectiveLimit - p.spentAmount), 'all')} left`}
+        </Text>
       </View>
-      <View style={[styles.track, { backgroundColor: theme.keypad }]}>
-        <View
-          style={[
-            styles.fill,
-            { backgroundColor: color, width: `${Math.max(2, Math.min(100, fraction * 100))}%` },
-          ]}
-        />
+      <View style={[styles.track, { backgroundColor: theme.keypad, marginTop: 6 }]}>
+        <View style={[styles.fill, { width: `${Math.max(2, Math.min(100, ratio * 100))}%`, backgroundColor: fill }]} />
       </View>
+      <Text style={[type.caption, { color: theme.textFaint, marginTop: 4, letterSpacing: 0.2 }]}>
+        {mask(formatAmount(p.spentAmount), 'all')} of {formatAmount(p.effectiveLimit)}
+        {over
+          ? ` · ${Math.round(ratio * 100)}%`
+          : p.daysLeft > 0
+            ? ` · ${mask(formatAmount(p.perDayLeft), 'all')} a day for ${p.daysLeft} days`
+            : ''}
+      </Text>
     </View>
   );
 }
 
-function Shortcut({ icon, label, hint, onPress }: { icon: string; label: string; hint: string; onPress: () => void }) {
+function Tile({
+  label,
+  value,
+  hint,
+  tone,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone?: 'positive' | 'negative';
+  onPress: () => void;
+}) {
   const theme = useTheme();
   const { tick } = usePreferences();
+  const color = tone === 'negative' ? theme.negative : tone === 'positive' ? theme.positive : theme.text;
   return (
     <Pressable
-      onPress={() => { tick(); onPress(); }}
-      style={({ pressed }) => [styles.shortcut, { borderColor: theme.hairline, backgroundColor: theme.bgElevated, opacity: pressed ? 0.7 : 1 }]}
+      onPress={() => {
+        tick();
+        onPress();
+      }}
+      style={({ pressed }) => [
+        styles.tile,
+        {
+          borderColor: tone === 'negative' ? theme.negative : theme.hairline,
+          backgroundColor: theme.bgElevated,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}
       accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}, ${hint}`}
     >
-      <Ionicons name={icon as never} size={18} color={theme.accent} />
-      <Text style={[type.label, { color: theme.text, marginTop: 6 }]}>{label}</Text>
-      <Text style={[type.caption, { color: theme.textFaint }]} numberOfLines={1}>{hint}</Text>
+      <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>{label}</Text>
+      <Text style={[type.amount, { color, marginTop: 6 }]} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
+        {hint}
+      </Text>
     </Pressable>
   );
 }
 
-function Line({
-  label,
-  value,
-  strong,
-  color,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-  color?: string;
-}) {
+function MoreToggle({ open, count, onPress }: { open: boolean; count: number; onPress: () => void }) {
   const theme = useTheme();
   return (
-    <View style={[styles.flowHeader, { marginBottom: 0, paddingVertical: 5 }]}>
-      <Text style={[strong ? type.label : type.body, { color: strong ? theme.text : theme.textMuted, flex: 1 }]}>
-        {label}
-      </Text>
-      <Text style={[type.amount, { color: color ?? theme.text, fontSize: strong ? 19 : 15 }]}>{value}</Text>
-    </View>
+    <Pressable onPress={onPress} hitSlop={8} style={styles.more}>
+      <Text style={[type.label, { color: theme.textMuted }]}>{open ? 'Show less' : `${count} more`}</Text>
+      <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={13} color={theme.textFaint} />
+    </Pressable>
   );
 }
 
 function SectionHeading({
   title,
+  detail,
+  detailColor,
   action,
   onAction,
 }: {
   title: string;
+  detail?: string;
+  detailColor?: string;
   action?: string;
   onAction?: () => void;
 }) {
   const theme = useTheme();
   return (
     <View style={styles.sectionHeading}>
-      <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
-        {title}
-      </Text>
+      <View style={styles.sectionTitle}>
+        <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
+          {title}
+        </Text>
+        {detail ? (
+          <Text style={[type.caption, { color: detailColor ?? theme.textMuted, letterSpacing: 0.2 }]} numberOfLines={1}>
+            {detail}
+          </Text>
+        ) : null}
+      </View>
       {action ? (
         <Pressable onPress={onAction} hitSlop={8}>
           <Text style={[type.label, { color: theme.textMuted }]}>{action}</Text>
@@ -533,25 +614,20 @@ const styles = StyleSheet.create({
   },
   heroAmount: { flexDirection: 'row', alignItems: 'flex-end', marginTop: space.sm },
   card: { marginHorizontal: space.lg },
-  shortcuts: { flexDirection: 'row', gap: space.sm, paddingHorizontal: space.lg, marginBottom: space.md },
-  shortcut: { flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.lg, padding: space.md },
+  tiles: { flexDirection: 'row', gap: space.sm, paddingHorizontal: space.lg },
+  tile: { flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.lg, padding: space.md },
   cardInner: { padding: space.lg },
-  cardHead: {
+  between: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginBottom: space.sm,
-  },
-  flowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginBottom: space.sm,
+    gap: space.sm,
   },
   flowLabel: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   swatch: { width: 8, height: 8, borderRadius: 2 },
-  track: { height: 6, borderRadius: radius.pill, overflow: 'hidden' },
+  track: { height: 4, borderRadius: radius.pill, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: radius.pill },
+  more: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   sectionHeading: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -560,12 +636,13 @@ const styles = StyleSheet.create({
     marginTop: space.xl,
     marginBottom: space.md,
   },
+  sectionTitle: { flexDirection: 'row', alignItems: 'baseline', gap: space.sm, flex: 1 },
   accountStrip: { paddingHorizontal: space.lg, gap: space.md },
   accountCard: { width: 158 },
   // A thin colour edge identifies the account without flooding the card.
   accountAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   accountInner: { padding: space.lg },
-  divider: { height: StyleSheet.hairlineWidth, marginLeft: 64 },
+  divider: { height: StyleSheet.hairlineWidth },
   upRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
   bookBtn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 4 },
   empty: { alignItems: 'center', paddingVertical: space.xl },
