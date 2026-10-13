@@ -386,44 +386,46 @@ export default function Overview() {
           )}
         </Glass>
 
-        {/* Accounts, each with its movement over the window. */}
+        {/* Accounts as ledger lines: name on the left, balance and its movement on the right. */}
         <SectionHeading title="Accounts" />
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.accountStrip}
-        >
-          {accounts.map((a, i) => {
-            const delta = accountDelta(a, transactions, range);
-            const accent = theme.categorical[i % theme.categorical.length];
-            return (
-              <Glass key={a.id} radiusSize={radius.md} style={styles.accountCard}>
-                <View style={[styles.accountAccent, { backgroundColor: accent }]} />
-                <View style={styles.accountInner}>
-                  <Text style={[type.label, { color: theme.textMuted }]} numberOfLines={1}>
-                    {a.accountName}
-                    {a.currency && a.currency !== prefs.currency ? ` · ${a.currency}` : ''}
-                  </Text>
-                  <Text style={[type.amount, { color: theme.text, fontSize: 19, marginTop: 6 }]}>
-                    {mask(formatAmount(a.currentBalance ?? 0))}
-                  </Text>
-                  <View style={{ marginTop: 6 }}>
-                    {hidden ? (
-                      <Text style={[type.caption, { color: theme.textFaint }]}>—</Text>
-                    ) : (
-                      <Delta value={delta} size="sm" />
-                    )}
+        <Glass style={styles.card}>
+          <View style={{ paddingVertical: space.xs }}>
+            {accounts.map((a, i) => {
+              const foreign = a.currency && a.currency !== prefs.currency;
+              return (
+                <View key={a.id}>
+                  {i > 0 ? (
+                    <View style={[styles.divider, { backgroundColor: theme.hairline, marginLeft: space.lg }]} />
+                  ) : null}
+                  <View style={styles.accountRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
+                        {a.accountName}
+                      </Text>
+                      {foreign && a.baseBalance != null ? (
+                        <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]}>
+                          ≈ {mask(formatAmount(a.baseBalance))} {prefs.currency}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View style={{ alignItems: 'flex-end', gap: 2 }}>
+                      <Text style={[type.amount, { color: theme.text }]}>
+                        {mask(formatAmount(a.currentBalance ?? 0))}
+                        {foreign ? <Text style={[type.caption, { color: theme.textFaint }]}> {a.currency}</Text> : null}
+                      </Text>
+                      {hidden ? null : <Delta value={accountDelta(a, transactions, range)} size="sm" />}
+                    </View>
                   </View>
                 </View>
-              </Glass>
-            );
-          })}
-          {accounts.length === 0 ? (
-            <Text style={[type.label, { color: theme.textFaint, paddingHorizontal: space.lg }]}>
-              No accounts yet — add one in Settings.
-            </Text>
-          ) : null}
-        </ScrollView>
+              );
+            })}
+            {accounts.length === 0 ? (
+              <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>
+                No accounts yet — add one in Settings.
+              </Text>
+            ) : null}
+          </View>
+        </Glass>
 
         {/* Recent activity */}
         <SectionHeading
@@ -637,11 +639,7 @@ const styles = StyleSheet.create({
     marginBottom: space.md,
   },
   sectionTitle: { flexDirection: 'row', alignItems: 'baseline', gap: space.sm, flex: 1 },
-  accountStrip: { paddingHorizontal: space.lg, gap: space.md },
-  accountCard: { width: 158 },
-  // A thin colour edge identifies the account without flooding the card.
-  accountAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
-  accountInner: { padding: space.lg },
+  accountRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
   divider: { height: StyleSheet.hairlineWidth },
   upRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
   bookBtn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 4 },
