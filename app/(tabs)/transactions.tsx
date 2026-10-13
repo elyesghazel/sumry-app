@@ -38,14 +38,18 @@ export default function Transactions() {
   const { prefs } = usePreferences();
   const deleteTransaction = useDeleteTransaction();
 
-  // Arriving from a category bar in Insights pre-fills the search.
-  const { q } = useLocalSearchParams<{ q?: string }>();
+  // Arriving from a category bar in Insights pre-fills the search; from an account row, the filter.
+  const { q, account } = useLocalSearchParams<{ q?: string; account?: string }>();
   const [query, setQuery] = useState(q ?? '');
 
   useEffect(() => {
     if (q) setQuery(q);
   }, [q]);
-  const [accountFilter, setAccountFilter] = useState<string | null>(null);
+  const [accountFilter, setAccountFilter] = useState<string | null>(account ?? null);
+
+  useEffect(() => {
+    if (account) setAccountFilter(account);
+  }, [account]);
   // `null` means all time; otherwise a shared timeframe key.
   const [period, setPeriod] = useState<Timeframe | null>(null);
 

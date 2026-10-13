@@ -397,7 +397,15 @@ export default function Overview() {
                   {i > 0 ? (
                     <View style={[styles.divider, { backgroundColor: theme.hairline, marginLeft: space.lg }]} />
                   ) : null}
-                  <View style={styles.accountRow}>
+                  <Pressable
+                    onPress={() => {
+                      tick();
+                      router.push({ pathname: '/transactions', params: { account: a.id } });
+                    }}
+                    style={({ pressed }) => [styles.accountRow, { opacity: pressed ? 0.6 : 1 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${a.accountName} transactions`}
+                  >
                     <View style={{ flex: 1 }}>
                       <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
                         {a.accountName}
@@ -415,7 +423,8 @@ export default function Overview() {
                       </Text>
                       {hidden ? null : <Delta value={accountDelta(a, transactions, range)} size="sm" />}
                     </View>
-                  </View>
+                    <Ionicons name="chevron-forward" size={14} color={theme.textFaint} />
+                  </Pressable>
                 </View>
               );
             })}
