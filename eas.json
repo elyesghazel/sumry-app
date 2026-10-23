@@ -18,7 +18,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://sumry-api.elyesghazel.ch"
+        "EXPO_PUBLIC_API_URL": "https://sumry.elyesghazel.ch"
       }
     },
     "production": {
@@ -27,7 +27,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://sumry-api.elyesghazel.ch"
+        "EXPO_PUBLIC_API_URL": "https://sumry.elyesghazel.ch"
       }
     }
   },

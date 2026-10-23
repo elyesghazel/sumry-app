@@ -9,7 +9,7 @@ import Constants from 'expo-constants';
 export const API_URL: string =
   process.env.EXPO_PUBLIC_API_URL ??
   (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ??
-  'https://sumry-api.elyesghazel.ch';
+  'https://sumry.elyesghazel.ch';
 
 export type CategoryType = 'INCOME' | 'EXPENSE';
 export type TransactionKind = 'INCOME' | 'EXPENSE' | 'TRANSFER_IN' | 'TRANSFER_OUT';
