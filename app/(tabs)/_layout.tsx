@@ -42,7 +42,7 @@ export default function TabsLayout() {
           name="index"
           options={{
             tabBarIcon: ({ color, focused }) => (
-              <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color} />
+              <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color as string} />
             ),
             tabBarAccessibilityLabel: 'Overview',
           }}
@@ -51,7 +51,7 @@ export default function TabsLayout() {
           name="transactions"
           options={{
             tabBarIcon: ({ color, focused }) => (
-              <Ionicons name={focused ? 'list' : 'list-outline'} size={23} color={color} />
+              <Ionicons name={focused ? 'list' : 'list-outline'} size={23} color={color as string} />
             ),
             tabBarAccessibilityLabel: 'Transactions',
           }}
@@ -68,7 +68,7 @@ export default function TabsLayout() {
               <Ionicons
                 name={focused ? 'stats-chart' : 'stats-chart-outline'}
                 size={21}
-                color={color}
+                color={color as string}
               />
             ),
             tabBarAccessibilityLabel: 'Insights',
@@ -81,7 +81,7 @@ export default function TabsLayout() {
               <Ionicons
                 name={focused ? 'settings' : 'settings-outline'}
                 size={21}
-                color={color}
+                color={color as string}
               />
             ),
             tabBarAccessibilityLabel: 'Settings',
