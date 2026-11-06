@@ -20,6 +20,8 @@ export type Account = {
   accountName: string;
   currentBalance: number;
   currency: string;
+  /** Counts toward safe-to-spend; off for savings. */
+  spending: boolean;
   /** The balance in the user's base currency at today's rate. */
   baseBalance: number;
   baseCurrency: string;
@@ -304,7 +306,7 @@ export const api = {
   createAccount: (token: string, accountName: string, currentBalance: number, currency = 'CHF') =>
     request<Account>('/api/users/accounts', { token, body: { accountName, currentBalance, currency } }),
 
-  updateAccount: (token: string, id: string, patch: { accountName?: string; currentBalance?: number; currency?: string }) =>
+  updateAccount: (token: string, id: string, patch: { accountName?: string; currentBalance?: number; currency?: string; spending?: boolean }) =>
     request<Account>(`/api/users/accounts/${id}`, { token, body: patch, method: 'PUT' }),
 
   deleteAccount: (token: string, id: string) =>

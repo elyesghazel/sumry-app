@@ -279,7 +279,12 @@ export default function Settings() {
                     { backgroundColor: theme.categorical[i % theme.categorical.length] },
                   ]}
                 />
-                <Text style={[type.body, { color: theme.text, flex: 1 }]}>{a.accountName}</Text>
+                <Text style={[type.body, { color: theme.text, flex: 1 }]}>
+                  {a.accountName}
+                  {a.spending === false ? (
+                    <Text style={[type.caption, { color: theme.textFaint }]}>  savings</Text>
+                  ) : null}
+                </Text>
                 <Text style={[type.amount, { color: theme.textMuted, fontSize: 15 }]}>
                   {mask(formatAmount(a.currentBalance ?? 0))}
                 </Text>
@@ -340,6 +345,17 @@ export default function Settings() {
                       <Text style={[type.label, { color: theme.bg }]}>Adjust</Text>
                     </Pressable>
                   </View>
+                  <SwitchRow
+                    icon="wallet-outline"
+                    label="Counts toward safe to spend"
+                    hint="Turn off for savings like Sparkonto"
+                    value={a.spending !== false}
+                    onChange={(v) =>
+                      mutate((t) => api.updateAccount(t, a.id, { spending: v })).catch((e) =>
+                        toast.error('Could not save', e instanceof Error ? e.message : 'Unknown error'),
+                      )
+                    }
+                  />
                 </View>
               ) : null}
             </View>
