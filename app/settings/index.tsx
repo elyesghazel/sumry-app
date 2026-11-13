@@ -7,7 +7,11 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { Screen } from '../../src/components/Screen';
 import { Divider, Group, LinkRow, SegmentRow, SwitchRow } from '../../src/components/Rows';
 import { useApp } from '../../src/store';
-import { formatAmount } from '../../src/core';
+import { formatAmount, type ShortcutToken } from '../../src/core';
+import * as Clipboard from 'expo-clipboard';
+import { Btn, Header } from '../../src/components/ui';
+import { shareTextFile } from '../../src/lib/files';
+import { shortDay } from '../../src/lib/dates';
 import { API_URL, api } from '../../src/api';
 import { TIMEFRAMES, usePreferences, useTheme } from '../../src/preferences';
 import { useToast } from '../../src/components/Toast';
@@ -23,7 +27,19 @@ export default function Settings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { prefs, set, reset, mask } = usePreferences();
-  const { user, accounts, categories, transactions, signOut, mutate, token } = useApp();
+  const { user, accounts, categories, transactions, budgets, rules, signOut, token, mutate } = useApp();
+  const [shortcut, setShortcut] = useState<ShortcutToken | null>(null);
+
+  const exportAs = async (kind: 'csv' | 'json') => {
+    if (!token) return;
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (kind === 'csv') await shareTextFile(`sumry-${stamp}.csv`, await api.exportCsv(token), 'text/csv');
+      else await shareTextFile(`sumry-${stamp}.json`, JSON.stringify(await api.exportJson(token), null, 2), 'application/json');
+    } catch (e) {
+      toast.error('Could not export', e instanceof Error ? e.message : 'Unknown error');
+    }
+  };
   const toast = useToast();
   const confirm = useConfirm();
   const confirmDestructive = useDestructiveAction();
@@ -55,38 +71,6 @@ export default function Settings() {
     })();
   }, []);
 
-  const [reconciling, setReconciling] = useState<string | null>(null);
-  const [realBalance, setRealBalance] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const reconcile = async (id: string) => {
-    const target = Number.parseFloat(realBalance.replace(',', '.'));
-    if (!Number.isFinite(target)) return;
-    setBusy(true);
-    try {
-      const account = accounts.find((a) => a.id === id);
-      const diff = target - (account?.currentBalance ?? 0);
-      await mutate((t) => api.reconcileAccount(t, id, target, 'Abgleich'));
-      setReconciling(null);
-      setRealBalance('');
-      if (Math.abs(diff) < 0.005) {
-        toast.show({
-          message: 'Already up to date',
-          description: 'The balance already matched — nothing was booked.',
-        });
-      } else {
-        toast.success(
-          'Account adjusted',
-          `Booked ${diff > 0 ? '+' : '−'}${formatAmount(diff)} as an "Einstellung" entry.`,
-        );
-      }
-    } catch (e) {
-      toast.error('Could not adjust', e instanceof Error ? e.message : 'Unknown error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const addAccount = async () => {
     const name = accountName.trim();
     const balance = Number.parseFloat(openingBalance || '0');
@@ -102,33 +86,18 @@ export default function Settings() {
     }
   };
 
-  const removeAccount = (id: string, name: string) =>
-    void confirmDestructive(
-      {
-        title: 'Delete this account?',
-        message: `${name} and every transaction on it will be removed. This cannot be undone.`,
-      },
-      () => mutate((t) => api.deleteAccount(t, id)),
-      {
-        onSuccess: () => toast.success('Account deleted', name),
-        onError: (message) => toast.error('Could not delete', message),
-      },
-    );
-
   const defaultAccountName =
     accounts.find((a) => a.id === prefs.defaultAccountId)?.accountName ?? 'First account';
 
   return (
     <Screen>
+      <Header title="Settings" />
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + space.md,
+          paddingTop: 0,
           paddingBottom: insets.bottom + 96,
         }}
       >
-        <Text style={[type.title, { color: theme.text, paddingHorizontal: space.xl }]}>
-          Settings
-        </Text>
 
         <Group title="Account">
           <View style={styles.identity}>
@@ -263,101 +232,17 @@ export default function Settings() {
           {accounts.map((a, i) => (
             <View key={a.id}>
               {i > 0 ? <Divider /> : null}
-              <Pressable
-                onPress={() => {
-                  setReconciling(reconciling === a.id ? null : a.id);
-                  setRealBalance(
-                    reconciling === a.id ? '' : String((a.currentBalance ?? 0).toFixed(2)),
-                  );
-                }}
-                onLongPress={() => removeAccount(a.id, a.accountName)}
-                style={styles.row}
-              >
-                <View
-                  style={[
-                    styles.accountDot,
-                    { backgroundColor: theme.categorical[i % theme.categorical.length] },
-                  ]}
-                />
-                <Text style={[type.body, { color: theme.text, flex: 1 }]}>
-                  {a.accountName}
-                  {a.spending === false ? (
-                    <Text style={[type.caption, { color: theme.textFaint }]}>  savings</Text>
-                  ) : null}
-                </Text>
-                <Text style={[type.amount, { color: theme.textMuted, fontSize: 15 }]}>
-                  {mask(formatAmount(a.currentBalance ?? 0))}
-                </Text>
-                <Ionicons
-                  name={reconciling === a.id ? 'chevron-up' : 'swap-vertical-outline'}
-                  size={16}
-                  color={theme.textFaint}
-                />
-              </Pressable>
-
-              {reconciling === a.id ? (
-                <View style={{ paddingHorizontal: space.lg, paddingBottom: space.lg, gap: space.sm }}>
-                  <Text style={[type.caption, { color: theme.textFaint }]}>
-                    Real balance — the difference is booked as an "Einstellung" entry
+              <Pressable onPress={() => router.push(`/account/${a.id}`)} style={styles.row}>
+                <View style={[styles.accountDot, { backgroundColor: a.spending !== false ? theme.text : theme.textFaint }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={[type.body, { color: theme.text }]}>{a.accountName}</Text>
+                  <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]}>
+                    {a.spending === false ? 'savings' : 'spending'} · {a.lastReconciledAt ? `checked ${shortDay(a.lastReconciledAt)}` : a.lastReconciledAt === null ? 'never checked' : a.currency}
                   </Text>
-                  <TextInput
-                    value={realBalance}
-                    onChangeText={setRealBalance}
-                    placeholder="e.g. 128.40"
-                    placeholderTextColor={theme.textFaint}
-                    keyboardType="decimal-pad"
-                    autoFocus
-                    style={[
-                      styles.input,
-                      {
-                        color: theme.text,
-                        backgroundColor: theme.keypad,
-                        borderColor: theme.hairline,
-                      },
-                    ]}
-                  />
-                  {Number.isFinite(Number.parseFloat(realBalance.replace(',', '.'))) ? (
-                    <Text style={[type.label, { color: theme.textMuted }]}>
-                      Adjustment:{' '}
-                      {(() => {
-                        const d =
-                          Number.parseFloat(realBalance.replace(',', '.')) -
-                          (a.currentBalance ?? 0);
-                        return `${d >= 0 ? '+' : '−'}${formatAmount(d)}`;
-                      })()}
-                    </Text>
-                  ) : null}
-                  <View style={{ flexDirection: 'row', gap: space.sm }}>
-                    <Pressable
-                      onPress={() => setReconciling(null)}
-                      style={[styles.action, { borderColor: theme.hairline }]}
-                    >
-                      <Text style={[type.label, { color: theme.textMuted }]}>Cancel</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => reconcile(a.id)}
-                      disabled={busy}
-                      style={[
-                        styles.action,
-                        { backgroundColor: theme.text, borderColor: theme.text, opacity: busy ? 0.4 : 1 },
-                      ]}
-                    >
-                      <Text style={[type.label, { color: theme.bg }]}>Adjust</Text>
-                    </Pressable>
-                  </View>
-                  <SwitchRow
-                    icon="wallet-outline"
-                    label="Counts toward safe to spend"
-                    hint="Turn off for savings like Sparkonto"
-                    value={a.spending !== false}
-                    onChange={(v) =>
-                      mutate((t) => api.updateAccount(t, a.id, { spending: v })).catch((e) =>
-                        toast.error('Could not save', e instanceof Error ? e.message : 'Unknown error'),
-                      )
-                    }
-                  />
                 </View>
-              ) : null}
+                <Text style={[type.amount, { color: theme.textMuted, fontSize: 15 }]}>{mask(formatAmount(a.currentBalance ?? 0))}</Text>
+                <Ionicons name="chevron-forward" size={16} color={theme.textFaint} />
+              </Pressable>
             </View>
           ))}
 
@@ -409,20 +294,18 @@ export default function Settings() {
             </>
           )}
         </Group>
-        <Hint text="Long-press an account to delete it." />
+        <Hint text="Tap an account to check it against the bank, rename it, delete it or take it out of safe to spend." />
 
-        <Group title="Plan">
-          <LinkRow
-            icon="calendar-outline"
-            label="Planned & goals"
-            onPress={() => router.push('/plan')}
-          />
+        <Group title="Data">
+          <LinkRow icon="cloud-upload-outline" label="Import statement" value="PDF, XML, CSV" onPress={() => router.push('/import')} />
           <Divider />
-          <LinkRow
-            icon="pie-chart-outline"
-            label="Budgets"
-            onPress={() => router.push('/budgets')}
-          />
+          <LinkRow icon="document-outline" label="Export CSV" value={`${transactions.length} entries`} onPress={() => void exportAs('csv')} />
+          <Divider />
+          <LinkRow icon="code-slash-outline" label="Export JSON" onPress={() => void exportAs('json')} />
+          <Divider />
+          <LinkRow icon="document-text-outline" label="Monthly statement" onPress={() => router.push('/statement')} />
+          <Divider />
+          <LinkRow icon="pie-chart-outline" label="Budgets" value={`${budgets.length}`} onPress={() => router.push('/budgets')} />
         </Group>
 
         {/* The token goes out through the share sheet: copy it, or AirDrop it to the Mac. */}
@@ -435,20 +318,28 @@ export default function Settings() {
               if (!token) return;
               try {
                 const res = await api.shortcutToken(token);
-                await Share.share({ message: res.token });
+                setShortcut(res);
+                await Clipboard.setStringAsync(res.token);
+                toast.success('Token copied', `Valid until ${shortDay(res.expiresAt)}. Paste it into the Shortcut.`);
               } catch (e) {
                 toast.error('Could not create token', e instanceof Error ? e.message : 'Unknown error');
               }
             }}
           />
         </Group>
+        {shortcut ? (
+          <View style={{ flexDirection: 'row', gap: space.sm, paddingHorizontal: space.lg, marginTop: space.sm }}>
+            <Btn small icon="copy-outline" label="Copy again" onPress={() => void Clipboard.setStringAsync(shortcut.token).then(() => toast.success('Copied'))} />
+            <Btn small icon="share-outline" label="Share" onPress={() => void Share.share({ message: shortcut.token })} />
+          </View>
+        ) : null}
         <Hint text="For the Wallet automation that logs Apple Pay payments. The token can only log entries and list categories; “Sign out everywhere” revokes it." />
 
         <Group title="Organise">
           <LinkRow
             icon="pricetags-outline"
-            label="Categories"
-            value={`${categories.length}`}
+            label="Categories and rules"
+            value={`${categories.length} · ${rules.length} rules`}
             onPress={() => router.push('/settings/categories')}
           />
           <Divider />
@@ -460,7 +351,7 @@ export default function Settings() {
           />
         </Group>
 
-        <Group title="Transactions list">
+        <Group title="Activity list">
           <SwitchRow
             label="Group by day"
             hint="Show day headers with running totals"
@@ -476,7 +367,7 @@ export default function Settings() {
           />
         </Group>
 
-        <Group title="Data">
+        <Group title="About">
           <View style={{ padding: space.lg, gap: space.sm }}>
             <Stat label="Transactions" value={String(transactions.length)} />
             <Stat label="Categories" value={String(categories.length)} />

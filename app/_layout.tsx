@@ -90,8 +90,15 @@ export default function RootLayout() {
                       <Stack.Screen name="settings/category" options={{ presentation: 'modal' }} />
                       <Stack.Screen name="settings/password" options={{ presentation: 'modal' }} />
                       <Stack.Screen name="settings/insights" />
-                      <Stack.Screen name="plan" />
+                      <Stack.Screen name="settings/index" />
                       <Stack.Screen name="budgets" />
+                      <Stack.Screen name="account/[id]" />
+                      <Stack.Screen name="pot/[id]" />
+                      <Stack.Screen name="category/[label]" />
+                      <Stack.Screen name="planned/[id]" />
+                      <Stack.Screen name="safe" />
+                      <Stack.Screen name="statement" />
+                      <Stack.Screen name="import" options={{ presentation: 'modal' }} />
                     </Stack>
                   </LockGate>
                 </AuthGate>
