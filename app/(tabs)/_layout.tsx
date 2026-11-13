@@ -6,8 +6,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radius, space } from '../../src/theme';
 import { usePreferences, useTheme } from '../../src/preferences';
 
+const tab = (title: string, on: string, off: string) => ({
+  title,
+  tabBarAccessibilityLabel: title,
+  tabBarIcon: ({ color, focused }: { color: unknown; focused: boolean }) => (
+    <Ionicons name={(focused ? on : off) as never} size={21} color={color as string} />
+  ),
+});
+
 /**
- * Four tabs and one action. The action sits in the middle of the bar because logging a
+ * Today, Activity, Plan, Insights and one action. Long-press the action for a transfer. The action sits in the middle of the bar because logging a
  * expense is the thing this app is for — it should never be more than one thumb-reach away.
  */
 export default function TabsLayout() {
@@ -16,7 +24,7 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const barHeight = 56 + insets.bottom;
+  const barHeight = 60 + insets.bottom;
 
   return (
     <View style={{ flex: 1 }}>
@@ -25,7 +33,8 @@ export default function TabsLayout() {
           headerShown: false,
           tabBarActiveTintColor: theme.text,
           tabBarInactiveTintColor: theme.textFaint,
-          tabBarShowLabel: false,
+          tabBarShowLabel: true,
+          tabBarLabelStyle: { fontFamily: 'Inter_500Medium', fontSize: 10 },
           sceneStyle: { backgroundColor: 'transparent' },
           tabBarStyle: {
             position: 'absolute',
@@ -38,61 +47,22 @@ export default function TabsLayout() {
           },
         }}
       >
-        <Tabs.Screen
-          name="index"
-          options={{
-            tabBarIcon: ({ color, focused }) => (
-              <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color as string} />
-            ),
-            tabBarAccessibilityLabel: 'Overview',
-          }}
-        />
-        <Tabs.Screen
-          name="transactions"
-          options={{
-            tabBarIcon: ({ color, focused }) => (
-              <Ionicons name={focused ? 'list' : 'list-outline'} size={23} color={color as string} />
-            ),
-            tabBarAccessibilityLabel: 'Transactions',
-          }}
-        />
+        <Tabs.Screen name="index" options={tab('Today', 'home', 'home-outline')} />
+        <Tabs.Screen name="activity" options={tab('Activity', 'list', 'list-outline')} />
         {/* Spacer so the floating action button has a slot of its own. */}
-        <Tabs.Screen
-          name="placeholder"
-          options={{ tabBarButton: () => <View style={{ flex: 1 }} /> }}
-        />
-        <Tabs.Screen
-          name="insights"
-          options={{
-            tabBarIcon: ({ color, focused }) => (
-              <Ionicons
-                name={focused ? 'stats-chart' : 'stats-chart-outline'}
-                size={21}
-                color={color as string}
-              />
-            ),
-            tabBarAccessibilityLabel: 'Insights',
-          }}
-        />
-        <Tabs.Screen
-          name="settings"
-          options={{
-            tabBarIcon: ({ color, focused }) => (
-              <Ionicons
-                name={focused ? 'settings' : 'settings-outline'}
-                size={21}
-                color={color as string}
-              />
-            ),
-            tabBarAccessibilityLabel: 'Settings',
-          }}
-        />
+        <Tabs.Screen name="placeholder" options={{ tabBarButton: () => <View style={{ flex: 1 }} /> }} />
+        <Tabs.Screen name="plan" options={tab('Plan', 'calendar', 'calendar-outline')} />
+        <Tabs.Screen name="insights" options={tab('Insights', 'stats-chart', 'stats-chart-outline')} />
       </Tabs>
 
       <Pressable
         onPress={() => {
           tick();
           router.push('/entry');
+        }}
+        onLongPress={() => {
+          tick();
+          router.push({ pathname: '/entry', params: { mode: 'TRANSFER' } });
         }}
         accessibilityRole="button"
         accessibilityLabel="Add transaction"

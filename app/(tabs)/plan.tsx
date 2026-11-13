@@ -1,67 +1,103 @@
-import React, { useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen } from '../src/components/Screen';
-import { Glass } from '../src/components/Glass';
-import { useToast } from '../src/components/Toast';
-import { useDestructiveAction } from '../src/components/ConfirmDialog';
-import { useApp } from '../src/store';
+import { Screen } from '../../src/components/Screen';
+import { GoalForm, PlannedForm } from '../../src/components/PlanForms';
+import { Btn, Card, Divider, Empty, Hint, Meter, Section, Segment, Swatch } from '../../src/components/ui';
+import { useToast } from '../../src/components/Toast';
+import { useApp } from '../../src/store';
 import {
-  Goal,
-  Planned,
-  Subscription,
+  dayOf,
   formatAmount,
+  isoDay,
+  mergePots,
   relativeDays,
-} from '../src/core';
-import { api } from '../src/api';
-import { usePreferences, useTheme } from '../src/preferences';
-import { categoryColor, radius, space, type } from '../src/theme';
+  type Occurrence,
+  type Pot,
+  type Subscription,
+} from '../../src/core';
+import { api } from '../../src/api';
+import { usePlanActions } from '../../src/actions';
+import { dayLabel, monthKey, monthTitle, shiftMonthKey, todayIso } from '../../src/lib/dates';
+import { usePreferences, useTheme } from '../../src/preferences';
+import { categoryColor, radius, space, type } from '../../src/theme';
+
+type View_ = 'ahead' | 'pots' | 'subs';
 
 /**
- * What is going to happen to the money: planned items you can book with a tap, savings
- * goals, and the subscriptions the history reveals. Creating richer plans (end dates,
- * transfers) is the web's job; here the common cases are one screen deep.
+ * What is ahead: planned items as a list or a calendar (book, skip, move), every plan,
+ * the pots (budgets and goals in one list) and the subscriptions the history reveals.
  */
 export default function Plan() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ view?: string; day?: string }>();
   const { prefs, tick, mask } = usePreferences();
-  const { planned, upcoming, goals, subscriptions, accounts, categories, refreshing, refresh, mutate } = useApp();
+  const { planned, upcoming, goals, progress, subscriptions, accounts, categories, refreshing, refresh, mutate } = useApp();
   const toast = useToast();
-  const confirmDestructive = useDestructiveAction();
-  const [adding, setAdding] = useState<null | 'planned' | 'goal'>(null);
-  const [contributing, setContributing] = useState<Goal | null>(null);
+  const actions = usePlanActions();
 
+  const [view, setView] = useState<View_>(params.view === 'pots' ? 'pots' : params.view === 'subs' ? 'subs' : 'ahead');
+  const [mode, setMode] = useState<'list' | 'calendar'>(params.day ? 'calendar' : 'list');
+  const [selectedDay, setSelectedDay] = useState<string>(params.day ?? todayIso());
+  const [month, setMonth] = useState(monthKey(new Date()));
+  const [open, setOpen] = useState<string | null>(null);
+  const [adding, setAdding] = useState<null | 'planned' | 'goal'>(null);
+
+  useEffect(() => {
+    if (params.view === 'pots') setView('pots');
+    if (params.view === 'subs') setView('subs');
+    if (params.day) {
+      setView('ahead');
+      setMode('calendar');
+      setSelectedDay(params.day);
+      setMonth(params.day.slice(0, 7));
+    }
+  }, [params.view, params.day]);
+
+  const today = todayIso();
   const monthlyOut = planned.filter((p) => p.isActive && p.kind === 'EXPENSE').reduce((s, p) => s + p.monthlyEquivalent, 0);
   const monthlyIn = planned.filter((p) => p.isActive && p.kind === 'INCOME').reduce((s, p) => s + p.monthlyEquivalent, 0);
   const monthlySave = planned.filter((p) => p.isActive && p.kind === 'TRANSFER_OUT').reduce((s, p) => s + p.monthlyEquivalent, 0);
 
-  const book = async (p: Planned) => {
-    tick();
-    try {
-      await mutate((t) => api.bookPlanned(t, p.id));
-      toast.success('Booked', `${p.name} · ${prefs.currency} ${formatAmount(p.amount)}`);
-    } catch (e) {
-      toast.error('Could not book', e instanceof Error ? e.message : 'Unknown error');
+  // Overdue first (they land on today), then by date.
+  const ordered = useMemo(
+    () =>
+      [...upcoming].sort((a, b) => {
+        if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+        return a.date.localeCompare(b.date);
+      }),
+    [upcoming],
+  );
+  // Only a plan's earliest unbooked occurrence can be skipped or moved.
+  const firstOfPlan = useMemo(() => {
+    const seen = new Set<string>();
+    const out = new Set<string>();
+    for (const o of ordered) {
+      if (seen.has(o.plannedId)) continue;
+      seen.add(o.plannedId);
+      out.add(`${o.plannedId}-${o.date}`);
     }
-  };
-  const toggleAuto = async (p: Planned) => {
-    tick();
-    try {
-      await mutate((t) => api.updatePlanned(t, p.id, { autoBook: !p.autoBook }));
-    } catch (e) {
-      toast.error('Could not change', e instanceof Error ? e.message : 'Unknown error');
+    return out;
+  }, [ordered]);
+
+  const byDay = useMemo(() => {
+    const m = new Map<string, Occurrence[]>();
+    for (const o of ordered) {
+      let k = dayOf(o.date);
+      if (k < today) k = today;
+      const list = m.get(k);
+      if (list) list.push(o);
+      else m.set(k, [o]);
     }
-  };
-  const removePlanned = (p: Planned) =>
-    void confirmDestructive(
-      { title: `Delete “${p.name}”?`, message: 'Entries already booked stay.', confirmLabel: 'Delete' },
-      () => mutate((t) => api.deletePlanned(t, p.id)),
-      { onSuccess: () => toast.success('Deleted', p.name), onError: (m) => toast.error('Could not delete', m) },
-    );
+    return m;
+  }, [ordered, today]);
+
+  const pots = useMemo(() => mergePots(progress, goals), [progress, goals]);
+
   const planSubscription = async (s: Subscription) => {
     const account = s.accountId ?? accounts[0]?.id;
     const category = s.categoryLabel ?? categories.find((c) => c.categoryType === 'EXPENSE')?.label;
@@ -83,378 +119,408 @@ export default function Plan() {
       toast.error('Could not plan', e instanceof Error ? e.message : 'Unknown error');
     }
   };
-  const removeGoal = (g: Goal) =>
-    void confirmDestructive(
-      { title: `Delete the goal “${g.name}”?`, message: 'The money stays where it is.', confirmLabel: 'Delete' },
-      () => mutate((t) => api.deleteGoal(t, g.id)),
-      { onSuccess: () => toast.success('Deleted', g.name), onError: (m) => toast.error('Could not delete', m) },
+
+  const occurrenceRow = (o: Occurrence, i: number, showDate: boolean) => {
+    const key = `${o.plannedId}-${o.date}`;
+    const movable = firstOfPlan.has(key);
+    const due = !o.autoBook && (o.overdue || dayOf(o.date) <= today);
+    const isOpen = open === key;
+    return (
+      <View key={key}>
+        {i > 0 ? <Divider /> : null}
+        <Pressable
+          onPress={() => {
+            tick();
+            setOpen(isOpen ? null : key);
+          }}
+          style={styles.row}
+        >
+          {showDate ? (
+            <Text style={[type.caption, { color: o.overdue ? theme.negative : theme.textFaint, width: 66 }]} numberOfLines={1}>
+              {o.overdue ? 'OVERDUE' : dayLabel(o.date)}
+            </Text>
+          ) : null}
+          <Swatch
+            color={o.kind === 'INCOME' ? theme.positive : o.kind === 'TRANSFER_OUT' ? theme.textFaint : categoryColor(theme, o.categoryLabel ?? o.name, o.categoryColor)}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
+              {o.name}
+            </Text>
+            <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
+              {o.toAccountName ? `${o.accountName} → ${o.toAccountName}` : `${o.categoryLabel ?? '—'} · ${o.accountName}`}
+              {o.autoBook ? ' · auto' : ''}
+            </Text>
+          </View>
+          <Text style={[type.amount, { color: o.kind === 'INCOME' ? theme.positive : theme.text, fontSize: 15 }]}>
+            {o.kind === 'INCOME' ? '+' : o.kind === 'TRANSFER_OUT' ? '⇄ ' : '−'}
+            {mask(formatAmount(o.amount), 'all')}
+          </Text>
+          {due ? <Btn small primary={o.overdue} label="Book" onPress={() => void actions.book(o)} /> : null}
+        </Pressable>
+        {isOpen ? (
+          <View style={styles.rowActions}>
+            {movable ? (
+              <>
+                <Btn small icon="play-skip-forward-outline" label="Skip" onPress={() => void actions.skip(o).then(() => setOpen(null))} />
+                <Btn small icon="arrow-forward-outline" label="+1 week" onPress={() => void actions.postpone(o, 7).then(() => setOpen(null))} />
+                <Btn small icon="calendar-outline" label="+1 month" onPress={() => void actions.postpone(o, 30).then(() => setOpen(null))} />
+              </>
+            ) : null}
+            <Btn small icon="open-outline" label="Details" onPress={() => router.push(`/planned/${o.plannedId}`)} />
+          </View>
+        ) : null}
+      </View>
     );
+  };
 
   return (
     <Screen>
-      <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
-        <Pressable onPress={() => router.back()} hitSlop={10}>
-          <Ionicons name="chevron-back" size={24} color={theme.textMuted} />
-        </Pressable>
-        <Text style={[type.title, { color: theme.text }]}>Plan</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
       <ScrollView
-        contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }}
+        contentContainerStyle={{ paddingTop: insets.top + space.md, paddingBottom: insets.bottom + 110 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.textMuted} />}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.statRow}>
-          <Stat label="In / month" value={mask(formatAmount(monthlyIn))} />
-          <Stat label="Out / month" value={mask(formatAmount(monthlyOut))} />
-          <Stat label="Saved / month" value={mask(formatAmount(monthlySave))} />
+        <View style={styles.head}>
+          <Text style={[type.title, { color: theme.text, flex: 1 }]}>Plan</Text>
+          <Btn small icon="add" label="Plan" onPress={() => { setView('ahead'); setAdding(adding === 'planned' ? null : 'planned'); }} />
+          <Btn small icon="add" label="Goal" onPress={() => { setView('pots'); setAdding(adding === 'goal' ? null : 'goal'); }} />
         </View>
 
-        <Heading title="Next 45 days" />
-        <Glass style={styles.card}>
-          <View style={{ paddingVertical: space.xs }}>
-            {upcoming.length ? (
-              upcoming.map((o, i) => (
-                <View key={`${o.plannedId}-${o.date}`}>
-                  {i > 0 ? <Divider /> : null}
-                  <View style={styles.row}>
-                    <Text style={[type.caption, { color: o.overdue ? theme.negative : theme.textFaint, width: 64 }]} numberOfLines={1}>
-                      {o.overdue ? 'OVERDUE' : relativeDays(o.date).toUpperCase()}
-                    </Text>
-                    <View style={[styles.swatch, { backgroundColor: o.categoryColor ?? theme.textFaint }]} />
-                    <Text style={[type.body, { color: theme.text, flex: 1 }]} numberOfLines={1}>{o.name}</Text>
-                    <Text style={[type.amount, { color: o.kind === 'INCOME' ? theme.positive : theme.text }]}>
-                      {o.kind === 'INCOME' ? '+' : o.kind === 'TRANSFER_OUT' ? '⇄ ' : '−'}{mask(formatAmount(o.amount), 'all')}
-                    </Text>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <Empty text="Nothing due. Add rent, salary and subscriptions below." />
-            )}
-          </View>
-        </Glass>
+        <View style={{ paddingHorizontal: space.lg, marginTop: space.md }}>
+          <Segment<View_>
+            options={[
+              ['ahead', 'Ahead'],
+              ['pots', `Pots · ${pots.length}`],
+              ['subs', 'Subscriptions'],
+            ]}
+            value={view}
+            onChange={setView}
+          />
+        </View>
 
-        <Heading title="Planned" action={adding === 'planned' ? 'Cancel' : 'Add'} onAction={() => setAdding(adding === 'planned' ? null : 'planned')} />
-        {adding === 'planned' ? <PlannedForm onDone={() => setAdding(null)} /> : null}
-        <Glass style={styles.card}>
-          <View style={{ paddingVertical: space.xs }}>
-            {planned.length ? (
-              planned.map((p, i) => (
-                <View key={p.id}>
-                  {i > 0 ? <Divider /> : null}
-                  <Pressable onLongPress={() => removePlanned(p)} style={[styles.row, { opacity: p.isActive ? 1 : 0.5 }]}>
-                    <View style={[styles.swatch, { backgroundColor: p.kind === 'TRANSFER_OUT' ? theme.textFaint : categoryColor(theme, p.categoryLabel ?? '', p.categoryColor) }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>{p.name}</Text>
-                      <Text style={[type.caption, { color: theme.textFaint, marginTop: 2 }]}>
-                        {p.frequency.toLowerCase()} · {p.nextDate ? relativeDays(p.nextDate) : '—'} · {p.kind === 'TRANSFER_OUT' ? `${p.accountName} → ${p.toAccountName}` : p.accountName}
+        {view === 'ahead' ? (
+          <>
+            <View style={styles.stats}>
+              <Stat label="In / month" value={mask(formatAmount(monthlyIn))} color={theme.positive} />
+              <Stat label="Out / month" value={mask(formatAmount(monthlyOut))} />
+              <Stat label="Saved / month" value={mask(formatAmount(monthlySave))} />
+            </View>
+
+            {adding === 'planned' ? (
+              <View style={{ marginTop: space.lg }}>
+                <PlannedForm onDone={() => setAdding(null)} />
+              </View>
+            ) : null}
+
+            <Section
+              title={mode === 'list' ? 'Next 60 days' : monthTitle(month)}
+              detail={`${upcoming.filter((o) => o.overdue).length ? `${upcoming.filter((o) => o.overdue).length} overdue` : ''}`}
+              detailColor={theme.negative}
+              action={mode === 'list' ? 'Calendar' : 'List'}
+              onAction={() => setMode(mode === 'list' ? 'calendar' : 'list')}
+            />
+
+            {mode === 'list' ? (
+              <Card padded={false}>
+                {ordered.length ? ordered.map((o, i) => occurrenceRow(o, i, true)) : <Empty text="Nothing due. Add rent, salary and subscriptions with + Plan." />}
+              </Card>
+            ) : (
+              <>
+                <Calendar
+                  month={month}
+                  onMonth={setMonth}
+                  selected={selectedDay}
+                  onSelect={setSelectedDay}
+                  byDay={byDay}
+                />
+                <Section
+                  title={selectedDay === today ? 'Today' : new Date(`${selectedDay}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}
+                />
+                <Card padded={false}>
+                  {(byDay.get(selectedDay) ?? []).length ? (
+                    (byDay.get(selectedDay) ?? []).map((o, i) => occurrenceRow(o, i, false))
+                  ) : (
+                    <Empty text="Nothing planned that day." />
+                  )}
+                </Card>
+              </>
+            )}
+            <Hint text="Tap a row to skip it or move it. Book posts it now." />
+
+            <Section title="All plans" detail={`${planned.filter((p) => p.isActive).length} active`} />
+            <Card padded={false}>
+              {planned.length ? (
+                planned.map((p, i) => (
+                  <View key={p.id}>
+                    {i > 0 ? <Divider /> : null}
+                    <Pressable
+                      onPress={() => {
+                        tick();
+                        router.push(`/planned/${p.id}`);
+                      }}
+                      style={({ pressed }) => [styles.row, { opacity: p.isActive ? (pressed ? 0.6 : 1) : 0.5 }]}
+                    >
+                      <Swatch color={p.kind === 'INCOME' ? theme.positive : p.kind === 'TRANSFER_OUT' ? theme.textFaint : categoryColor(theme, p.categoryLabel ?? '', p.categoryColor)} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
+                          {p.name}
+                        </Text>
+                        <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
+                          {p.frequency.toLowerCase()} · {p.nextDate ? relativeDays(p.nextDate) : 'ended'} ·{' '}
+                          {p.kind === 'TRANSFER_OUT' ? `${p.accountName} → ${p.toAccountName}` : p.accountName}
+                          {p.autoBook ? ' · auto' : ''}
+                        </Text>
+                      </View>
+                      <Text style={[type.amount, { color: p.kind === 'INCOME' ? theme.positive : theme.text, fontSize: 15 }]}>
+                        {p.kind === 'INCOME' ? '+' : p.kind === 'TRANSFER_OUT' ? '' : '−'}
+                        {mask(formatAmount(p.amount), 'all')}
                       </Text>
-                    </View>
-                    <Text style={[type.amount, { color: p.kind === 'INCOME' ? theme.positive : theme.text }]}>
-                      {p.kind === 'INCOME' ? '+' : p.kind === 'TRANSFER_OUT' ? '' : '−'}{mask(formatAmount(p.amount), 'all')}
-                    </Text>
-                    <Pressable onPress={() => toggleAuto(p)} hitSlop={6} style={[styles.miniBtn, { borderColor: p.autoBook ? theme.text : theme.hairlineStrong, backgroundColor: p.autoBook ? theme.text : 'transparent' }]}>
-                      <Text style={[type.caption, { color: p.autoBook ? theme.bgElevated : theme.textMuted }]}>AUTO</Text>
+                      <Ionicons name="chevron-forward" size={14} color={theme.textFaint} />
                     </Pressable>
-                    <Pressable onPress={() => book(p)} hitSlop={6} style={[styles.miniBtn, { borderColor: theme.hairlineStrong }]}>
-                      <Text style={[type.caption, { color: theme.text }]}>BOOK</Text>
-                    </Pressable>
-                  </Pressable>
-                </View>
-              ))
-            ) : (
-              <Empty text="Rent, salary, the savings transfer: plan them and the home screen knows what is safe to spend." />
-            )}
-          </View>
-        </Glass>
-        {planned.length ? <Hint text="Long-press a plan to delete it. AUTO books it on the day without asking." /> : null}
-
-        <Heading title="Goals" action={adding === 'goal' ? 'Cancel' : 'Add'} onAction={() => setAdding(adding === 'goal' ? null : 'goal')} />
-        {adding === 'goal' ? <GoalForm onDone={() => setAdding(null)} /> : null}
-        {goals.map((g) => {
-          const ratio = g.targetAmount > 0 ? Math.min(1, g.current / g.targetAmount) : 0;
-          return (
-            <Glass key={g.id} style={[styles.card, { marginBottom: space.md }]}>
-              <Pressable onLongPress={() => removeGoal(g)} style={styles.cardInner}>
-                <View style={styles.between}>
-                  <Text style={[type.label, { color: theme.text }]}>{g.name}</Text>
-                  <Text style={[type.caption, { color: g.achieved ? theme.positive : g.onTrack === false ? theme.negative : theme.textFaint }]}>
-                    {g.achieved ? 'REACHED' : g.onTrack === false ? 'BEHIND' : g.onTrack ? 'ON TRACK' : ''}
-                  </Text>
-                </View>
-                <View style={[styles.between, { alignItems: 'baseline', marginTop: 6 }]}>
-                  <Text style={[type.display, { color: theme.text, fontSize: 30 }]}>{mask(formatAmount(g.current))}</Text>
-                  <Text style={[type.label, { color: theme.textMuted }]}>of {formatAmount(g.targetAmount)}</Text>
-                </View>
-                <View style={[styles.track, { backgroundColor: theme.keypad }]}>
-                  <View style={[styles.fill, { width: `${Math.max(2, ratio * 100)}%`, backgroundColor: theme.text }]} />
-                </View>
-                <Text style={[type.caption, { color: theme.textFaint, marginTop: 6 }]}>
-                  {g.accountName ? `tracks ${g.accountName}` : 'manual'}
-                  {g.targetDate ? ` · by ${g.targetDate}` : ''}
-                  {g.requiredPerMonth !== null && !g.achieved ? ` · ${formatAmount(g.requiredPerMonth)}/month needed` : ''}
-                </Text>
-                {!g.achieved ? (
-                  <Pressable onPress={() => setContributing(contributing?.id === g.id ? null : g)} style={[styles.action, { borderColor: theme.hairlineStrong, alignSelf: 'flex-start', marginTop: space.sm }]}>
-                    <Text style={[type.label, { color: theme.text }]}>Add money</Text>
-                  </Pressable>
-                ) : null}
-                {contributing?.id === g.id ? <Contribute goal={g} onDone={() => setContributing(null)} /> : null}
-              </Pressable>
-            </Glass>
-          );
-        })}
-        {!goals.length && adding !== 'goal' ? <Glass style={styles.card}><Empty text="A goal is a target amount, optionally by a date. Link it to Sparkonto and it tracks that balance." /></Glass> : null}
-
-        <Heading title="Subscriptions found" />
-        <Glass style={styles.card}>
-          <View style={{ paddingVertical: space.xs }}>
-            {subscriptions?.subscriptions.length ? (
-              subscriptions.subscriptions.map((s, i) => (
-                <View key={s.name}>
-                  {i > 0 ? <Divider /> : null}
-                  <View style={[styles.row, { opacity: s.active ? 1 : 0.5 }]}>
-                    <View style={[styles.swatch, { backgroundColor: s.categoryColor ?? theme.textFaint }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>{s.name}</Text>
-                      <Text style={[type.caption, { color: theme.textFaint, marginTop: 2 }]}>{s.interval.toLowerCase()} · {s.occurrences}× · next {relativeDays(s.nextExpected)}</Text>
-                    </View>
-                    <Text style={[type.amount, { color: theme.text }]}>{mask(formatAmount(s.medianAmount), 'all')}</Text>
-                    {s.planned ? (
-                      <Ionicons name="checkmark-circle" size={18} color={theme.positive} />
-                    ) : s.active ? (
-                      <Pressable onPress={() => planSubscription(s)} hitSlop={6} style={[styles.miniBtn, { borderColor: theme.hairlineStrong }]}>
-                        <Text style={[type.caption, { color: theme.text }]}>PLAN</Text>
-                      </Pressable>
-                    ) : null}
                   </View>
-                </View>
-              ))
-            ) : (
-              <Empty text="Nothing recurring detected yet — it takes three payments of the same thing at a steady interval." />
-            )}
-          </View>
-        </Glass>
-        {subscriptions ? <Hint text={`${formatAmount(subscriptions.monthlyTotal)} ${prefs.currency} a month · ${formatAmount(subscriptions.yearlyTotal)} a year`} /> : null}
+                ))
+              ) : (
+                <Empty text="Rent, salary, the savings transfer: plan them and Today knows what is safe to spend." />
+              )}
+            </Card>
+          </>
+        ) : null}
+
+        {view === 'pots' ? (
+          <>
+            {adding === 'goal' ? (
+              <View style={{ marginTop: space.lg }}>
+                <GoalForm onDone={() => setAdding(null)} />
+              </View>
+            ) : null}
+            <Section title="Budgets and goals" action="Manage budgets" onAction={() => router.push('/budgets')} />
+            <View style={{ gap: space.sm }}>
+              {pots.map((p) => (
+                <PotCard key={`${p.kind}-${p.id}`} pot={p} onPress={() => router.push({ pathname: '/pot/[id]', params: { id: p.id, kind: p.kind } })} />
+              ))}
+              {pots.length === 0 ? (
+                <Card>
+                  <Text style={[type.label, { color: theme.textFaint }]}>
+                    No pots yet. A budget caps a category each month; a goal saves towards an amount. Add a goal above or set a budget under Manage budgets.
+                  </Text>
+                </Card>
+              ) : null}
+            </View>
+          </>
+        ) : null}
+
+        {view === 'subs' ? (
+          <>
+            {subscriptions ? (
+              <View style={styles.stats}>
+                <Stat label="Active" value={String(subscriptions.activeCount)} />
+                <Stat label="A month" value={mask(formatAmount(subscriptions.monthlyTotal), 'all')} />
+                <Stat label="A year" value={mask(formatAmount(subscriptions.yearlyTotal), 'all')} />
+              </View>
+            ) : null}
+            <Section title="Found in your history" />
+            <Card padded={false}>
+              {subscriptions?.subscriptions.length ? (
+                subscriptions.subscriptions.map((s, i) => (
+                  <View key={s.name}>
+                    {i > 0 ? <Divider /> : null}
+                    <View style={[styles.row, { opacity: s.active ? 1 : 0.5 }]}>
+                      <Swatch color={categoryColor(theme, s.categoryLabel ?? s.name, s.categoryColor)} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
+                          {s.name}
+                        </Text>
+                        <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
+                          {s.interval.toLowerCase()} · {s.occurrences}× · next {relativeDays(s.nextExpected)} · {mask(formatAmount(s.paidLast12Months), 'all')} / 12 mo
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={[type.amount, { color: theme.text, fontSize: 15 }]}>{mask(formatAmount(s.medianAmount), 'all')}</Text>
+                        <Text style={[type.caption, { color: theme.textFaint }]}>{mask(formatAmount(s.monthlyEquivalent), 'all')}/mo</Text>
+                      </View>
+                      {s.planned ? (
+                        <Ionicons name="checkmark-circle" size={18} color={theme.positive} />
+                      ) : s.active ? (
+                        <Btn small label="Plan" onPress={() => void planSubscription(s)} />
+                      ) : null}
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Empty text="Nothing recurring detected yet. It takes three payments of the same thing at a steady interval." />
+              )}
+            </Card>
+            <Hint text="Plan turns a subscription into a planned item, so safe to spend counts it." />
+          </>
+        ) : null}
       </ScrollView>
     </Screen>
   );
 }
 
-function PlannedForm({ onDone }: { onDone: () => void }) {
+function PotCard({ pot, onPress }: { pot: Pot; onPress: () => void }) {
   const theme = useTheme();
-  const { prefs } = usePreferences();
-  const { accounts, categories, mutate } = useApp();
-  const toast = useToast();
-  const [kind, setKind] = useState<'EXPENSE' | 'INCOME' | 'TRANSFER'>('EXPENSE');
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [day, setDay] = useState(String(new Date().getDate()));
-  const [category, setCategory] = useState<string | null>(null);
-  const [accountId, setAccountId] = useState<string | null>(prefs.defaultAccountId ?? accounts[0]?.id ?? null);
-  const [toId, setToId] = useState<string | null>(accounts[1]?.id ?? null);
-  const [busy, setBusy] = useState(false);
-  const value = Number.parseFloat(amount.replace(',', '.'));
-  const valid = name.trim() && value > 0 && accountId && (kind === 'TRANSFER' ? toId && toId !== accountId : category);
-
-  const save = async () => {
-    if (!valid) return;
-    setBusy(true);
-    try {
-      const d = Math.min(28, Math.max(1, Number.parseInt(day) || 1));
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), d);
-      const iso = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      await mutate((t) =>
-        api.createPlanned(t, {
-          name: name.trim(), amount: value, startDate: iso, frequency: 'MONTHLY', accountId: accountId!,
-          categoryLabel: kind === 'TRANSFER' ? null : category, toAccountId: kind === 'TRANSFER' ? toId : null,
-        }),
-      );
-      toast.success('Planned', `${name.trim()} · monthly on the ${d}.`);
-      onDone();
-    } catch (e) {
-      toast.error('Could not save', e instanceof Error ? e.message : 'Unknown error');
-    } finally {
-      setBusy(false);
-    }
-  };
-  const field = { color: theme.text, backgroundColor: theme.bgElevated, borderColor: theme.hairline };
+  const { mask, tick } = usePreferences();
+  const tone = pot.status === 'over' || pot.status === 'behind' ? 'over' : pot.status === 'warn' ? 'warn' : pot.status === 'done' ? 'ok' : 'ink';
+  const statusText =
+    pot.kind === 'budget'
+      ? pot.status === 'over'
+        ? `${formatAmount(-pot.remaining)} over`
+        : `${formatAmount(pot.remaining)} left · ${pot.budget.daysLeft} d`
+      : pot.status === 'done'
+        ? 'reached'
+        : pot.status === 'behind'
+          ? 'behind'
+          : pot.goal.requiredPerMonth
+            ? `${formatAmount(pot.goal.requiredPerMonth)}/mo needed`
+            : `${formatAmount(pot.remaining)} to go`;
   return (
-    <Glass style={[styles.card, { marginBottom: space.md }]}>
-      <View style={[styles.cardInner, { gap: space.md }]}>
-        <Segment options={[['EXPENSE', 'Expense'], ['INCOME', 'Income'], ['TRANSFER', 'Transfer']]} value={kind} onChange={(k) => setKind(k as typeof kind)} />
-        <TextInput value={name} onChangeText={setName} placeholder={kind === 'INCOME' ? 'Lohn' : kind === 'TRANSFER' ? 'Sparen' : 'Miete'} placeholderTextColor={theme.textFaint} style={[styles.input, field]} />
-        <View style={{ flexDirection: 'row', gap: space.sm }}>
-          <TextInput value={amount} onChangeText={setAmount} placeholder={`Amount · ${prefs.currency}`} placeholderTextColor={theme.textFaint} keyboardType="decimal-pad" style={[styles.input, field, { flex: 1 }]} />
-          <TextInput value={day} onChangeText={setDay} placeholder="Day" placeholderTextColor={theme.textFaint} keyboardType="number-pad" style={[styles.input, field, { width: 80 }]} />
+    <Pressable
+      onPress={() => {
+        tick();
+        onPress();
+      }}
+      style={({ pressed }) => [styles.pot, { backgroundColor: theme.bgElevated, borderColor: theme.hairline, opacity: pressed ? 0.7 : 1 }]}
+    >
+      <View style={styles.between}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, flex: 1 }}>
+          <Swatch color={categoryColor(theme, pot.name, pot.color)} />
+          <Text style={[type.body, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
+            {pot.name}
+          </Text>
+          <Text style={[type.caption, { color: theme.textFaint }]}>{pot.kind === 'budget' ? pot.budget.period.toLowerCase() : 'goal'}</Text>
         </View>
-        <Text style={[type.caption, { color: theme.textFaint }]}>MONTHLY, ON DAY {day || '?'} · MORE OPTIONS ON THE WEB</Text>
-        <Pills items={accounts.map((a) => ({ key: a.id, label: kind === 'TRANSFER' ? `from ${a.accountName}` : a.accountName }))} selected={accountId} onSelect={setAccountId} />
-        {kind === 'TRANSFER' ? (
-          <Pills items={accounts.filter((a) => a.id !== accountId).map((a) => ({ key: a.id, label: `to ${a.accountName}` }))} selected={toId} onSelect={setToId} />
-        ) : (
-          <Pills items={categories.filter((c) => c.categoryType === (kind === 'INCOME' ? 'INCOME' : 'EXPENSE')).sort((a, b) => a.label.localeCompare(b.label)).map((c) => ({ key: c.label, label: c.label }))} selected={category} onSelect={setCategory} />
-        )}
-        <Pressable onPress={save} disabled={!valid || busy} style={[styles.action, { backgroundColor: theme.text, borderColor: theme.text, opacity: valid && !busy ? 1 : 0.4 }]}>
-          <Text style={[type.label, { color: theme.bgElevated }]}>{busy ? 'Saving…' : 'Save plan'}</Text>
+        <Text style={[type.label, { color: tone === 'over' ? theme.negative : theme.textMuted }]}>
+          {mask(formatAmount(pot.current), pot.kind === 'goal' ? 'balances' : 'all')} / {formatAmount(pot.target)}
+        </Text>
+      </View>
+      <Meter ratio={pot.ratio} tone={tone} height={5} style={{ marginTop: 8 }} />
+      <Text style={[type.caption, { color: tone === 'over' ? theme.negative : theme.textFaint, marginTop: 4, letterSpacing: 0.2 }]}>
+        {statusText}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** Month grid, Monday first. Dots mark planned items; overdue ones sit on today. */
+function Calendar({
+  month,
+  onMonth,
+  selected,
+  onSelect,
+  byDay,
+}: {
+  month: string;
+  onMonth: (m: string) => void;
+  selected: string;
+  onSelect: (d: string) => void;
+  byDay: Map<string, Occurrence[]>;
+}) {
+  const theme = useTheme();
+  const { tick } = usePreferences();
+  const today = todayIso();
+  const [y, m] = month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const lead = (first.getDay() + 6) % 7;
+  const daysIn = new Date(y, m, 0).getDate();
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < lead; i++) cells.push(null);
+  for (let d = 1; d <= daysIn; d++) cells.push(isoDay(new Date(y, m - 1, d)));
+  while (cells.length % 7) cells.push(null);
+
+  return (
+    <Card>
+      <View style={[styles.between, { marginBottom: space.sm }]}>
+        <Pressable onPress={() => onMonth(shiftMonthKey(month, -1))} hitSlop={10}>
+          <Ionicons name="chevron-back" size={18} color={theme.textMuted} />
+        </Pressable>
+        <Text style={[type.label, { color: theme.text }]}>{monthTitle(month)}</Text>
+        <Pressable onPress={() => onMonth(shiftMonthKey(month, 1))} hitSlop={10}>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
         </Pressable>
       </View>
-    </Glass>
-  );
-}
-
-function GoalForm({ onDone }: { onDone: () => void }) {
-  const theme = useTheme();
-  const { prefs } = usePreferences();
-  const { accounts, mutate } = useApp();
-  const toast = useToast();
-  const [name, setName] = useState('');
-  const [target, setTarget] = useState('');
-  const [accountId, setAccountId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const value = Number.parseFloat(target.replace(',', '.'));
-  const valid = name.trim() && value > 0;
-  const save = async () => {
-    if (!valid) return;
-    setBusy(true);
-    try {
-      await mutate((t) => api.createGoal(t, { name: name.trim(), targetAmount: value, accountId }));
-      toast.success('Goal set', name.trim());
-      onDone();
-    } catch (e) {
-      toast.error('Could not save', e instanceof Error ? e.message : 'Unknown error');
-    } finally {
-      setBusy(false);
-    }
-  };
-  const field = { color: theme.text, backgroundColor: theme.bgElevated, borderColor: theme.hairline };
-  return (
-    <Glass style={[styles.card, { marginBottom: space.md }]}>
-      <View style={[styles.cardInner, { gap: space.md }]}>
-        <TextInput value={name} onChangeText={setName} placeholder="Notgroschen" placeholderTextColor={theme.textFaint} style={[styles.input, field]} />
-        <TextInput value={target} onChangeText={setTarget} placeholder={`Target · ${prefs.currency}`} placeholderTextColor={theme.textFaint} keyboardType="decimal-pad" style={[styles.input, field]} />
-        <Text style={[type.caption, { color: theme.textFaint }]}>TRACKS AN ACCOUNT (OPTIONAL)</Text>
-        <Pills items={[{ key: '', label: 'My own count' }, ...accounts.map((a) => ({ key: a.id, label: a.accountName }))]} selected={accountId ?? ''} onSelect={(k) => setAccountId(k || null)} />
-        <Pressable onPress={save} disabled={!valid || busy} style={[styles.action, { backgroundColor: theme.text, borderColor: theme.text, opacity: valid && !busy ? 1 : 0.4 }]}>
-          <Text style={[type.label, { color: theme.bgElevated }]}>{busy ? 'Saving…' : 'Save goal'}</Text>
-        </Pressable>
+      <View style={styles.calRow}>
+        {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map((d) => (
+          <Text key={d} style={[type.caption, styles.calHead, { color: theme.textFaint }]}>
+            {d}
+          </Text>
+        ))}
       </View>
-    </Glass>
+      {Array.from({ length: cells.length / 7 }, (_, w) => (
+        <View key={w} style={styles.calRow}>
+          {cells.slice(w * 7, w * 7 + 7).map((iso, i) => {
+            if (!iso) return <View key={i} style={styles.calCell} />;
+            const items = byDay.get(iso) ?? [];
+            const isSel = iso === selected;
+            const net = items.reduce((s, o) => s + (o.kind === 'INCOME' ? o.amount : o.kind === 'TRANSFER_IN' ? 0 : -o.amount), 0);
+            return (
+              <Pressable
+                key={iso}
+                onPress={() => {
+                  tick();
+                  onSelect(iso);
+                }}
+                style={[
+                  styles.calCell,
+                  {
+                    backgroundColor: isSel ? theme.text : 'transparent',
+                    borderColor: iso === today && !isSel ? theme.text : 'transparent',
+                  },
+                ]}
+              >
+                <Text style={[type.label, { color: isSel ? theme.bg : iso < today ? theme.textFaint : theme.text }]}>{Number(iso.slice(8))}</Text>
+                <View style={{ flexDirection: 'row', gap: 2, height: 5, marginTop: 2 }}>
+                  {items.slice(0, 3).map((o) => (
+                    <View
+                      key={`${o.plannedId}-${o.date}`}
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: 3,
+                        backgroundColor: isSel ? theme.bg : o.overdue ? theme.negative : o.kind === 'INCOME' ? theme.positive : theme.accent,
+                      }}
+                    />
+                  ))}
+                </View>
+                {items.length ? (
+                  <Text style={{ fontSize: 8.5, color: isSel ? theme.bg : net > 0 ? theme.positive : theme.textFaint }} numberOfLines={1}>
+                    {net > 0 ? '+' : '−'}
+                    {Math.abs(net) >= 1000 ? `${(Math.abs(net) / 1000).toFixed(1)}k` : Math.round(Math.abs(net))}
+                  </Text>
+                ) : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+      <Text style={[type.caption, { color: theme.textFaint, marginTop: space.sm, letterSpacing: 0.2 }]}>
+        Shows the next 60 days of plans.
+      </Text>
+    </Card>
   );
 }
 
-function Contribute({ goal, onDone }: { goal: Goal; onDone: () => void }) {
-  const theme = useTheme();
-  const { prefs } = usePreferences();
-  const { accounts, mutate } = useApp();
-  const toast = useToast();
-  const [amount, setAmount] = useState(goal.requiredPerMonth ? goal.requiredPerMonth.toFixed(2) : '');
-  const [from, setFrom] = useState<string | null>(accounts.find((a) => a.id !== goal.accountId)?.id ?? null);
-  const [busy, setBusy] = useState(false);
-  const value = Number.parseFloat(amount.replace(',', '.'));
-  const valid = value > 0 && (!goal.accountId || from);
-  const save = async () => {
-    if (!valid) return;
-    setBusy(true);
-    try {
-      await mutate((t) => api.contributeGoal(t, goal.id, value, goal.accountId ? from : null));
-      toast.success(`Added ${prefs.currency} ${formatAmount(value)}`, goal.name);
-      onDone();
-    } catch (e) {
-      toast.error('Could not add', e instanceof Error ? e.message : 'Unknown error');
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <View style={{ gap: space.sm, marginTop: space.md }}>
-      <TextInput value={amount} onChangeText={setAmount} placeholder={`Amount · ${prefs.currency}`} placeholderTextColor={theme.textFaint} keyboardType="decimal-pad" style={[styles.input, { color: theme.text, backgroundColor: theme.bg, borderColor: theme.hairline }]} />
-      {goal.accountId ? <Pills items={accounts.filter((a) => a.id !== goal.accountId).map((a) => ({ key: a.id, label: `from ${a.accountName}` }))} selected={from} onSelect={setFrom} /> : null}
-      <Pressable onPress={save} disabled={!valid || busy} style={[styles.action, { backgroundColor: theme.text, borderColor: theme.text, opacity: valid && !busy ? 1 : 0.4 }]}>
-        <Text style={[type.label, { color: theme.bgElevated }]}>{busy ? 'Adding…' : goal.accountId ? 'Transfer' : 'Add'}</Text>
-      </Pressable>
-    </View>
-  );
-}
-
-// ---- small shared pieces
-
-function Heading({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
-  const theme = useTheme();
-  return (
-    <View style={styles.heading}>
-      <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>{title}</Text>
-      {action ? (
-        <Pressable onPress={onAction} hitSlop={8}><Text style={[type.label, { color: theme.textMuted }]}>{action}</Text></Pressable>
-      ) : null}
-    </View>
-  );
-}
-function Divider() {
-  const theme = useTheme();
-  return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: theme.hairline, marginLeft: space.lg }} />;
-}
-function Empty({ text }: { text: string }) {
-  const theme = useTheme();
-  return <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>{text}</Text>;
-}
-function Hint({ text }: { text: string }) {
-  const theme = useTheme();
-  return <Text style={[type.caption, { color: theme.textFaint, paddingHorizontal: space.xl, marginTop: space.sm }]}>{text}</Text>;
-}
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   const theme = useTheme();
   return (
     <View style={{ flex: 1 }}>
       <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>{label}</Text>
-      <Text style={[type.amount, { color: theme.text, fontSize: 20, marginTop: 4 }]}>{value}</Text>
-    </View>
-  );
-}
-function Segment({ options, value, onChange }: { options: [string, string][]; value: string; onChange: (v: string) => void }) {
-  const theme = useTheme();
-  return (
-    <View style={[styles.segment, { borderColor: theme.hairline }]}>
-      {options.map(([k, l]) => (
-        <Pressable key={k} onPress={() => onChange(k)} style={[styles.segmentItem, value === k ? { backgroundColor: theme.text } : null]}>
-          <Text style={[type.label, { color: value === k ? theme.bgElevated : theme.textMuted }]}>{l}</Text>
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-function Pills({ items, selected, onSelect }: { items: { key: string; label: string }[]; selected: string | null; onSelect: (k: string) => void }) {
-  const theme = useTheme();
-  return (
-    <View style={styles.wrap}>
-      {items.map((it) => (
-        <Pressable key={it.key} onPress={() => onSelect(it.key)} style={[styles.pill, { backgroundColor: selected === it.key ? theme.text : theme.keypad, borderColor: selected === it.key ? theme.text : theme.hairline }]}>
-          <Text style={[type.label, { color: selected === it.key ? theme.bgElevated : theme.textMuted }]}>{it.label}</Text>
-        </Pressable>
-      ))}
+      <Text style={[type.amount, { color: color ?? theme.text, fontSize: 19, marginTop: 4 }]} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.lg, paddingBottom: space.md },
-  statRow: { flexDirection: 'row', gap: space.md, paddingHorizontal: space.xl, marginTop: space.sm },
-  heading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: space.xl, marginTop: space.xl, marginBottom: space.md },
-  card: { marginHorizontal: space.lg },
-  cardInner: { padding: space.lg },
+  head: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.xl, gap: space.sm },
+  stats: { flexDirection: 'row', gap: space.md, paddingHorizontal: space.xl, marginTop: space.lg },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
-  between: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  swatch: { width: 8, height: 8, borderRadius: 2 },
-  miniBtn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 7, paddingVertical: 4, marginLeft: 2 },
-  track: { height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 8 },
-  fill: { height: '100%', borderRadius: 2 },
-  action: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingVertical: 10, paddingHorizontal: 14, alignItems: 'center' },
-  input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: space.md, paddingVertical: 10, fontSize: 16 },
-  segment: { flexDirection: 'row', borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, overflow: 'hidden' },
-  segmentItem: { flex: 1, alignItems: 'center', paddingVertical: 8 },
-  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
-  pill: { paddingHorizontal: space.md, paddingVertical: 7, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth },
+  rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, paddingHorizontal: space.lg, paddingBottom: space.md, paddingLeft: 90 },
+  between: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space.sm },
+  pot: { marginHorizontal: space.lg, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.lg, padding: space.md },
+  calRow: { flexDirection: 'row' },
+  calHead: { flex: 1, textAlign: 'center', letterSpacing: 0, marginBottom: 4 },
+  calCell: { flex: 1, alignItems: 'center', paddingVertical: 4, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, minHeight: 46 },
 });

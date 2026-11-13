@@ -1,746 +1,608 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen } from '../../src/components/Screen';
-import { Glass } from '../../src/components/Glass';
 import { TransactionRow } from '../../src/components/TransactionRow';
 import { Delta } from '../../src/components/Delta';
+import { Sparkline } from '../../src/components/charts';
+import { Btn, Card, Divider, Meter, Section, Swatch } from '../../src/components/ui';
 import { useApp } from '../../src/store';
-import { usePreferences, useTheme, TIMEFRAMES } from '../../src/preferences';
+import { usePreferences, useTheme } from '../../src/preferences';
 import {
   accountDelta,
-  resolveRange,
-  totals,
+  addDays,
+  dailyAllowance,
+  dayOf,
   formatAmount,
-  relativeDays,
-  BudgetProgress,
-  Occurrence,
+  formatShortDate,
+  isoDay,
+  mergePots,
+  needsYou,
+  projectBalance,
+  resolveRange,
+  startOfDay,
+  totals,
+  type NeedsYouItem,
+  type Occurrence,
 } from '../../src/core';
-import { api } from '../../src/api';
-import { useToast } from '../../src/components/Toast';
-import { useDeleteTransaction } from '../../src/actions';
+import { useDeleteTransaction, usePlanActions } from '../../src/actions';
+import { unsnoozed, useSnoozes } from '../../src/lib/snooze';
+import { longToday } from '../../src/lib/dates';
 import { categoryColor, radius, space, type } from '../../src/theme';
 
-// How far ahead the plan list looks, and how many rows each list shows before folding.
-const PLAN_DAYS = 30;
-const PLAN_ROWS = 6;
-const BUDGET_ROWS = 6;
-
-const overBy = (p: BudgetProgress) => p.spentAmount - p.effectiveLimit;
-const isOver = (p: BudgetProgress) => overBy(p) > 0.005;
-const todayIso = () => new Date().toISOString().slice(0, 10);
-
 /**
- * The overview answers three questions in order: how much is free, am I over a budget,
- * what is about to go out. The charts and the forecast breakdown live in Insights.
+ * Today answers three questions in order: can I spend, does anything need me, what is
+ * coming. Everything the old overview showed stays here in compact form, and every figure
+ * opens a screen with more detail.
  */
-export default function Overview() {
+export default function Today() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { prefs, set, tick, hidden, reveal, mask } = usePreferences();
-  const { accounts, categories, transactions, refreshing, refresh, error, safe, forecast, upcoming, progress, mutate } = useApp();
-  const toast = useToast();
+  const { prefs, tick, hidden, reveal, mask, set } = usePreferences();
+  const {
+    accounts,
+    categories,
+    transactions,
+    refreshing,
+    refresh,
+    error,
+    safe,
+    forecast,
+    upcoming,
+    progress,
+    budgets,
+    goals,
+  } = useApp();
   const deleteTransaction = useDeleteTransaction();
-  const [allBudgets, setAllBudgets] = useState(false);
-  const [allPlanned, setAllPlanned] = useState(false);
-  // The planned row whose actions are open, as `${plannedId}-${date}`.
-  const [openPlan, setOpenPlan] = useState<string | null>(null);
+  const plan = usePlanActions();
+  const { snoozes, snooze, clear } = useSnoozes();
 
   const range = useMemo(() => resolveRange(prefs.timeframe), [prefs.timeframe]);
+  const categoryByLabel = useMemo(() => new Map(categories.map((c) => [c.label, c])), [categories]);
+  const accountName = useMemo(() => new Map(accounts.map((a) => [a.id, a.accountName])), [accounts]);
 
-  const categoryByLabel = useMemo(
-    () => new Map(categories.map((c) => [c.label, c])),
-    [categories],
-  );
-  const accountById = useMemo(
-    () => new Map(accounts.map((a) => [a.id, a.accountName])),
-    [accounts],
-  );
-
-  const netWorth = useMemo(
-    () => accounts.reduce((sum, a) => sum + (a.baseBalance ?? a.currentBalance ?? 0), 0),
-    [accounts],
-  );
-
-  const periodTotals = useMemo(() => totals(transactions, range), [transactions, range]);
-
-  // Net movement across every account over the window — the change behind the headline.
-  const netChange = useMemo(
-    () => accounts.reduce((sum, a) => sum + accountDelta(a, transactions, range), 0),
-    [accounts, transactions, range],
-  );
-
-  // Worst first: overspent envelopes by how far over, then the rest by how full they are.
-  const budgets = useMemo(
-    () =>
-      [...progress].sort((a, b) => {
-        const oa = isOver(a);
-        const ob = isOver(b);
-        if (oa !== ob) return oa ? -1 : 1;
-        if (oa) return overBy(b) - overBy(a);
-        const ra = a.effectiveLimit > 0 ? a.spentAmount / a.effectiveLimit : 0;
-        const rb = b.effectiveLimit > 0 ? b.spentAmount / b.effectiveLimit : 0;
-        return rb - ra;
-      }),
-    [progress],
-  );
-  const overBudgets = useMemo(() => budgets.filter(isOver), [budgets]);
-  const overTotal = useMemo(() => overBudgets.reduce((s, p) => s + overBy(p), 0), [overBudgets]);
-  // Never fold away an overspent budget.
-  const budgetFold = Math.max(BUDGET_ROWS, overBudgets.length);
-  const shownBudgets = allBudgets ? budgets : budgets.slice(0, budgetFold);
-
-  // Overdue first, then everything due within the next month.
-  const plan = useMemo(() => {
-    const today = todayIso();
-    const horizon = new Date(Date.now() + PLAN_DAYS * 86_400_000).toISOString().slice(0, 10);
-    const overdue = upcoming.filter((o) => o.overdue);
-    const items = [...overdue, ...upcoming.filter((o) => !o.overdue && o.date <= horizon)];
-    const sum = (pred: (o: Occurrence) => boolean) =>
-      items.filter(pred).reduce((s, o) => s + o.amount, 0);
-    return {
-      items,
-      overdue: overdue.length,
-      toBook: items.filter((o) => !o.autoBook && (o.overdue || o.date <= today)).length,
-      income: sum((o) => o.kind === 'INCOME'),
-      out: sum((o) => o.kind !== 'INCOME'),
-    };
-  }, [upcoming]);
-  const planFold = Math.max(PLAN_ROWS, plan.overdue);
-  const shownPlan = allPlanned ? plan.items : plan.items.slice(0, planFold);
-
+  const allowance = useMemo(() => dailyAllowance(safe, transactions), [safe, transactions]);
+  const committed = safe ? safe.upcomingExpenses + safe.upcomingTransfersOut : 0;
   const nextIncome = useMemo(
-    () => (safe ? upcoming.find((o) => o.kind === 'INCOME' && o.date === safe.horizon) : undefined),
+    () => (safe ? upcoming.find((o) => o.kind === 'INCOME' && dayOf(o.date) === safe.horizon.slice(0, 10)) : undefined),
     [safe, upcoming],
   );
 
-  const recent = useMemo(
-    () =>
-      [...transactions]
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 5),
-    [transactions],
+  const netWorth = useMemo(() => accounts.reduce((s, a) => s + (a.baseBalance ?? a.currentBalance ?? 0), 0), [accounts]);
+  const period = useMemo(() => totals(transactions, range), [transactions, range]);
+  const netChange = useMemo(
+    () => accounts.reduce((s, a) => s + accountDelta(a, transactions, range), 0),
+    [accounts, transactions, range],
   );
 
-  const bookNow = async (id: string, name: string) => {
-    tick();
-    try {
-      await mutate((t) => api.bookPlanned(t, id));
-      toast.success('Booked', name);
-    } catch (e) {
-      toast.error('Could not book', e instanceof Error ? e.message : 'Unknown error');
-    }
-  };
+  const inbox = useMemo(
+    () => needsYou({ accounts, transactions, upcoming, progress, budgets }),
+    [accounts, transactions, upcoming, progress, budgets],
+  );
+  const visibleInbox = useMemo(() => unsnoozed(inbox, snoozes), [inbox, snoozes]);
+  const snoozedCount = inbox.length - visibleInbox.length;
 
-  // Only a plan's earliest unbooked occurrence can be skipped or moved.
-  const firstOfPlan = useMemo(() => {
-    const seen = new Set<string>();
-    const out = new Set<string>();
-    for (const o of plan.items) {
-      if (seen.has(o.plannedId)) continue;
-      seen.add(o.plannedId);
-      out.add(`${o.plannedId}-${o.date}`);
-    }
-    return out;
-  }, [plan.items]);
+  // Spending accounts drive the 14-day line, the same ones safe-to-spend looks at.
+  const spendingAccounts = useMemo(() => {
+    const ids = safe?.accountIds?.length ? new Set(safe.accountIds) : null;
+    return accounts.filter((a) => (ids ? ids.has(a.id) : a.spending !== false));
+  }, [accounts, safe]);
+  const projection = useMemo(() => projectBalance(spendingAccounts, upcoming, 14), [spendingAccounts, upcoming]);
 
-  const skip = async (o: Occurrence) => {
-    tick();
-    try {
-      await mutate((t) => api.skipPlanned(t, o.plannedId, o.date));
-      setOpenPlan(null);
-      toast.success('Skipped', `${o.name} · ${dayLabel(o.date).toLowerCase()}`);
-    } catch (e) {
-      toast.error('Could not skip', e instanceof Error ? e.message : 'Unknown error');
+  const week = useMemo(() => {
+    const today = startOfDay(new Date());
+    const todayKey = isoDay(today);
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = addDays(today, i);
+      return { key: isoDay(d), date: d, items: [] as Occurrence[], net: 0 };
+    });
+    const byKey = new Map(days.map((d) => [d.key, d]));
+    for (const o of upcoming) {
+      let k = dayOf(o.date);
+      if (k < todayKey) k = todayKey;
+      const slot = byKey.get(k);
+      if (!slot) continue;
+      slot.items.push(o);
+      if (o.kind === 'INCOME') slot.net += o.amount;
+      else if (o.kind !== 'TRANSFER_IN') slot.net -= o.amount;
     }
-  };
+    return { days, net: days.reduce((s, d) => s + d.net, 0) };
+  }, [upcoming]);
 
-  const postpone = async (o: Occurrence, days: number) => {
-    tick();
-    const to = shiftIso(o.date, days);
-    const today = todayIso();
-    try {
-      await mutate((t) => api.postponePlanned(t, o.plannedId, o.date, to < today ? today : to));
-      setOpenPlan(null);
-      toast.success('Moved', `${o.name} → ${dayLabel(to < today ? today : to).toLowerCase()}`);
-    } catch (e) {
-      toast.error('Could not move', e instanceof Error ? e.message : 'Unknown error');
-    }
-  };
+  const topBudgets = useMemo(() => mergePots(progress, []).slice(0, 3), [progress]);
+  const goalCount = goals.filter((g) => g.isActive !== false).length;
 
-  const cycleTimeframe = () => {
-    const i = TIMEFRAMES.findIndex((t) => t.key === prefs.timeframe);
+  const recent = useMemo(() => {
+    const sorted = [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const todayKey = isoDay(new Date());
+    const todays = sorted.filter((t) => dayOf(t.date) === todayKey);
+    return { title: todays.length ? 'Today' : 'Recent', rows: todays.length >= 3 ? todays.slice(0, 8) : sorted.slice(0, 5) };
+  }, [transactions]);
+
+  const hero = safe ? allowance.leftToday : netWorth;
+  const meterTone = allowance.over ? 'over' : allowance.ratio >= 0.8 ? 'warn' : 'ok';
+
+  const togglePrivacy = () => {
     tick();
-    set('timeframe', TIMEFRAMES[(i + 1) % TIMEFRAMES.length].key);
+    if (prefs.privacy === 'off') set('privacy', 'balances');
+    else reveal();
   };
 
   return (
     <Screen>
       <ScrollView
-        contentContainerStyle={{
-          paddingTop: insets.top + space.lg,
-          paddingBottom: insets.bottom + 96,
-        }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.textMuted} />
-        }
+        contentContainerStyle={{ paddingTop: insets.top + space.md, paddingBottom: insets.bottom + 110 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.textMuted} />}
       >
-        {error ? (
-          <Text style={[type.label, styles.error, { color: theme.negative }]}>{error}</Text>
-        ) : null}
-
-        {/* Safe to spend — what is actually free before the next planned income. */}
-        <View style={styles.hero}>
-          <Pressable onPress={cycleTimeframe} hitSlop={8} style={styles.timeframeRow}>
-            <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
-              {safe ? 'Safe to spend' : 'Total balance'}
-            </Text>
-            <View style={[styles.timeframeChip, { backgroundColor: theme.keypad }]}>
-              <Text style={[type.caption, { color: theme.textMuted }]}>{range.label}</Text>
-              <Ionicons name="chevron-down" size={11} color={theme.textFaint} />
-            </View>
+        <View style={styles.top}>
+          <Text style={[type.label, { color: theme.textFaint, flex: 1 }]}>{longToday()}</Text>
+          <Pressable
+            onPress={togglePrivacy}
+            onLongPress={() => set('privacy', 'off')}
+            hitSlop={8}
+            style={[styles.chip, { backgroundColor: theme.keypad }]}
+            accessibilityRole="button"
+            accessibilityLabel={hidden ? 'Show amounts' : 'Hide amounts'}
+          >
+            <Ionicons name={hidden ? 'eye-off-outline' : 'eye-outline'} size={13} color={theme.textMuted} />
+            <Text style={[type.caption, { color: theme.textMuted, letterSpacing: 0.2 }]}>{hidden ? 'show' : 'hide'}</Text>
           </Pressable>
-
-          {/* Tapping the figure reveals it; it re-hides as soon as the app is backgrounded. */}
           <Pressable
             onPress={() => {
-              if (prefs.privacy !== 'off') {
-                tick();
-                reveal();
-              }
+              tick();
+              router.push('/settings');
             }}
-            style={styles.heroAmount}
-            accessibilityRole={prefs.privacy !== 'off' ? 'button' : undefined}
-            accessibilityLabel={hidden ? 'Balance hidden, tap to reveal' : undefined}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
           >
-            <Text
-              style={[
-                type.display,
-                { color: safe && safe.safeToSpend < 0 ? theme.negative : theme.text },
-              ]}
-            >
-              {safe && safe.safeToSpend < 0 ? '−' : ''}
-              {mask(formatAmount(safe ? safe.safeToSpend : netWorth))}
-            </Text>
-            <Text style={[type.label, { color: theme.textFaint, marginBottom: 10 }]}>
-              {' '}
-              {prefs.currency}
-            </Text>
-            {prefs.privacy !== 'off' ? (
-              <Ionicons
-                name={hidden ? 'eye-off-outline' : 'eye-outline'}
-                size={16}
-                color={theme.textFaint}
-                style={{ marginBottom: 12, marginLeft: space.sm }}
-              />
-            ) : null}
+            <Ionicons name="settings-outline" size={21} color={theme.textMuted} />
           </Pressable>
-
-          {hidden ? (
-            <Text style={[type.label, { color: theme.textFaint }]}>Hidden · tap to show</Text>
-          ) : (
-            <View style={{ gap: 2 }}>
-              {safe ? (
-                <Text style={[type.label, { color: theme.textMuted }]}>
-                  {formatAmount(safe.perDay)} a day until {nextIncome ? `${nextIncome.name} ` : ''}
-                  {relativeDays(safe.horizon)}
-                </Text>
-              ) : null}
-              <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]}>
-                Net worth {formatAmount(netWorth)} · in {formatAmount(periodTotals.income)} · out{' '}
-                {formatAmount(periodTotals.expense)}
-              </Text>
-              <View style={{ marginTop: 4 }}>
-                <Delta value={netChange} suffix={`in ${range.label.toLowerCase()}`} />
-              </View>
-            </View>
-          )}
         </View>
 
-        {/* Three verdicts, readable without scrolling; each opens its detail. */}
-        <View style={styles.tiles}>
-          <Tile
-            label="Budgets"
-            value={progress.length ? (overBudgets.length ? `${overBudgets.length} over` : 'On track') : 'None'}
-            hint={
-              progress.length
-                ? overBudgets.length
-                  ? `${mask(formatAmount(overTotal), 'all')} too much`
-                  : `${progress.length} envelopes`
-                : 'set a cap'
-            }
-            tone={overBudgets.length ? 'negative' : progress.length ? 'positive' : undefined}
-            onPress={() => router.push('/budgets')}
-          />
-          <Tile
-            label="Planned"
-            value={
-              plan.toBook
-                ? `${plan.toBook} to book`
-                : plan.items.length
-                  ? `−${mask(formatAmount(plan.out), 'all')}`
-                  : 'Nothing'
-            }
-            hint={plan.toBook ? 'due now' : plan.items.length ? `next ${PLAN_DAYS} days` : 'rent, salary…'}
-            tone={plan.overdue ? 'negative' : undefined}
-            onPress={() => router.push('/plan')}
-          />
-          <Tile
-            label="Month end"
-            value={
-              forecast
-                ? `${forecast.projectedNet < 0 ? '−' : '+'}${mask(formatAmount(forecast.projectedNet), 'all')}`
-                : '—'
-            }
-            hint={
-              forecast
-                ? forecast.verdict === 'over'
-                  ? 'above usual'
-                  : forecast.verdict === 'under'
-                    ? 'below usual'
-                    : 'about usual'
-                : 'no forecast yet'
-            }
-            tone={forecast ? (forecast.projectedNet < 0 ? 'negative' : 'positive') : undefined}
-            onPress={() => router.push('/insights')}
-          />
-        </View>
+        {error ? <Text style={[type.label, styles.error, { color: theme.negative }]}>{error}</Text> : null}
 
-        {/* Budgets, worst first, so an overspend is the first line of the card. */}
-        <SectionHeading
-          title="Budgets"
-          detail={progress.length ? `${overBudgets.length} of ${progress.length} over` : undefined}
-          detailColor={overBudgets.length ? theme.negative : undefined}
-          action={progress.length ? 'Edit' : 'Set one'}
-          onAction={() => router.push('/budgets')}
-        />
-        <Glass style={styles.card}>
-          {progress.length ? (
-            <View style={[styles.cardInner, { gap: space.md }]}>
-              {shownBudgets.map((p) => (
-                <BudgetRow
-                  key={p.budgetId}
-                  p={p}
-                  color={categoryColor(theme, p.categoryLabel, categoryByLabel.get(p.categoryLabel)?.color ?? p.categoryColor)}
-                />
-              ))}
-              {budgets.length > budgetFold ? (
-                <MoreToggle
-                  open={allBudgets}
-                  count={budgets.length - budgetFold}
-                  onPress={() => {
-                    tick();
-                    setAllBudgets((v) => !v);
-                  }}
-                />
-              ) : null}
-            </View>
-          ) : (
-            <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>
-              No budgets yet. Put a cap on Essen gehen or Shopping and this card tells you the moment you pass it.
+        {/* Can I spend? Today's allowance, refilled every morning. */}
+        <Pressable
+          onPress={() => {
+            tick();
+            router.push('/safe');
+          }}
+          style={styles.hero}
+          accessibilityRole="button"
+          accessibilityLabel="Safe to spend details"
+        >
+          <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
+            {safe ? 'Safe to spend today' : 'Total balance'}
+          </Text>
+          <View style={styles.heroAmount}>
+            <Text style={[type.display, { color: hero < 0 ? theme.negative : theme.text, fontSize: 50 }]}>
+              {hero < 0 ? '−' : ''}
+              {mask(formatAmount(hero))}
             </Text>
-          )}
-        </Glass>
+            <Text style={[type.label, { color: theme.textFaint, marginBottom: 10 }]}> {prefs.currency}</Text>
+          </View>
+          {safe ? (
+            <>
+              <Meter ratio={allowance.ratio} tone={meterTone} height={8} style={{ marginTop: space.md }} />
+              <View style={[styles.between, { marginTop: 6 }]}>
+                <Text style={[type.label, { color: theme.textMuted }]}>
+                  {mask(formatAmount(allowance.spentToday), 'all')} spent of {mask(formatAmount(allowance.perDay))}
+                </Text>
+                <Text style={[type.label, { color: theme.textFaint }]} numberOfLines={1}>
+                  {mask(formatAmount(safe.safeToSpend))} till {nextIncome ? nextIncome.name : formatShortDate(safe.horizon)} · {safe.daysToHorizon} d
+                </Text>
+              </View>
+              <Text style={[type.caption, { color: theme.textFaint, marginTop: 3, letterSpacing: 0.2 }]}>
+                {mask(formatAmount(safe.balance))} on hand − {mask(formatAmount(committed), 'all')} committed
+              </Text>
+            </>
+          ) : null}
+        </Pressable>
 
-        {/* What is due in the next month; anything due and manual can be booked here. */}
-        <SectionHeading
-          title="Planned"
-          detail={
-            plan.items.length
-              ? `${plan.income ? `+${mask(formatAmount(plan.income), 'all')} · ` : ''}−${mask(formatAmount(plan.out), 'all')}`
-              : undefined
-          }
-          action={plan.items.length ? 'Plan' : 'Add a plan'}
+        {/* Account strip. Ink border = counts toward safe to spend. */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.accounts}>
+          {accounts.map((a) => (
+            <Pressable
+              key={a.id}
+              onPress={() => {
+                tick();
+                router.push(`/account/${a.id}`);
+              }}
+              style={({ pressed }) => [
+                styles.account,
+                {
+                  backgroundColor: theme.bgElevated,
+                  borderColor: a.spending !== false ? theme.text : theme.hairline,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={`${a.accountName} account`}
+            >
+              <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
+                {a.accountName}
+              </Text>
+              <Text style={[type.amount, { color: (a.currentBalance ?? 0) < 0 ? theme.negative : theme.text, fontSize: 16 }]}>
+                {mask(formatAmount(a.currentBalance ?? 0))}
+                {a.currency !== prefs.currency ? <Text style={[type.caption, { color: theme.textFaint }]}> {a.currency}</Text> : null}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+
+        {/* Does anything need me? */}
+        <Section
+          title="Needs you"
+          detail={visibleInbox.length ? String(visibleInbox.length) : undefined}
+          detailColor={theme.negative}
+          action={snoozedCount ? `${snoozedCount} snoozed · show` : undefined}
+          onAction={clear}
+        />
+        <Card padded={false}>
+          {visibleInbox.length ? (
+            visibleInbox.map((item, i) => (
+              <View key={item.id}>
+                {i > 0 ? <Divider /> : null}
+                <InboxRow
+                  item={item}
+                  mask={mask}
+                  onSnooze={() => {
+                    tick();
+                    snooze(item.id, 1);
+                  }}
+                  onOpen={() => {
+                    tick();
+                    openItem(item, router);
+                  }}
+                  plan={plan}
+                />
+              </View>
+            ))
+          ) : (
+            <View style={[styles.row, { paddingVertical: space.lg }]}>
+              <Ionicons name="checkmark-circle-outline" size={18} color={theme.positive} />
+              <Text style={[type.label, { color: theme.textMuted }]}>All clear. Nothing needs you.</Text>
+            </View>
+          )}
+        </Card>
+
+        {/* What is coming? */}
+        <Section
+          title="Next 7 days"
+          detail={week.net ? `${week.net > 0 ? '+' : '−'}${mask(formatAmount(week.net), 'all')}` : 'nothing planned'}
+          action="Plan →"
           onAction={() => router.push('/plan')}
         />
-        <Glass style={styles.card}>
-          {plan.items.length ? (
-            <View style={{ paddingVertical: space.xs }}>
-              {shownPlan.map((o, i) => {
-                const prev = shownPlan[i - 1];
-                const newDay = !prev || prev.date !== o.date || prev.overdue !== o.overdue;
-                const due = !o.autoBook && (o.overdue || o.date <= todayIso());
-                const key = `${o.plannedId}-${o.date}`;
-                const movable = firstOfPlan.has(key);
-                const open = openPlan === key;
-                return (
-                  <View key={key}>
-                    {i > 0 ? (
-                      <View
-                        style={[
-                          styles.divider,
-                          { backgroundColor: theme.hairline, marginLeft: newDay ? space.lg : 96 },
-                        ]}
+        <View style={styles.week}>
+          {week.days.map((d, i) => (
+            <Pressable
+              key={d.key}
+              onPress={() => {
+                tick();
+                router.push({ pathname: '/plan', params: { day: d.key } });
+              }}
+              style={[
+                styles.day,
+                { backgroundColor: theme.bgElevated, borderColor: i === 0 ? theme.text : theme.hairline },
+              ]}
+            >
+              <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0 }]}>
+                {d.date.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 2)}
+              </Text>
+              <Text style={[type.amount, { color: theme.text, fontSize: 15 }]}>{d.date.getDate()}</Text>
+              {d.items.length ? (
+                <>
+                  <View style={{ flexDirection: 'row', gap: 2, marginTop: 3 }}>
+                    {d.items.slice(0, 3).map((o) => (
+                      <Swatch
+                        key={`${o.plannedId}-${o.date}`}
+                        size={5}
+                        color={
+                          o.kind === 'INCOME'
+                            ? theme.positive
+                            : o.overdue
+                              ? theme.negative
+                              : categoryColor(theme, o.categoryLabel ?? o.name, o.categoryColor)
+                        }
                       />
-                    ) : null}
-                    {/* Tap opens skip / move for the plan's next occurrence. */}
-                    <Pressable
-                      onPress={movable ? () => { tick(); setOpenPlan(open ? null : key); } : undefined}
-                      style={styles.upRow}
-                      accessibilityHint={movable ? 'Shows skip and move' : undefined}
-                    >
-                      <Text
-                        style={[type.caption, { color: o.overdue ? theme.negative : theme.textFaint, width: 72 }]}
-                        numberOfLines={1}
-                      >
-                        {newDay ? (o.overdue ? 'OVERDUE' : dayLabel(o.date)) : ''}
-                      </Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
-                          {o.name}
-                        </Text>
-                        <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
-                          {o.toAccountName ? `→ ${o.toAccountName}` : o.categoryLabel ?? o.accountName}
-                          {o.autoBook ? ' · auto' : ''}
-                        </Text>
-                      </View>
-                      <Text
-                        style={[
-                          type.amount,
-                          { color: o.kind === 'INCOME' ? theme.positive : theme.text, fontSize: 15 },
-                        ]}
-                      >
-                        {o.kind === 'INCOME' ? '+' : '−'}
-                        {mask(formatAmount(o.amount), 'all')}
-                      </Text>
-                      {due ? (
-                        <Pressable
-                          onPress={() => bookNow(o.plannedId, o.name)}
-                          hitSlop={6}
-                          style={[styles.bookBtn, { borderColor: o.overdue ? theme.negative : theme.hairlineStrong }]}
-                        >
-                          <Text style={[type.caption, { color: o.overdue ? theme.negative : theme.text }]}>BOOK</Text>
-                        </Pressable>
-                      ) : null}
-                    </Pressable>
-                    {open ? (
-                      <View style={styles.planActions}>
-                        <PlanAction label="Skip" icon="play-skip-forward-outline" onPress={() => skip(o)} />
-                        <PlanAction label="+1 week" icon="arrow-forward-outline" onPress={() => postpone(o, 7)} />
-                        <PlanAction label="+1 month" icon="calendar-outline" onPress={() => postpone(o, 30)} />
-                      </View>
-                    ) : null}
+                    ))}
                   </View>
-                );
-              })}
-              {plan.items.length > planFold ? (
-                <View style={{ paddingHorizontal: space.lg, paddingVertical: space.sm }}>
-                  <MoreToggle
-                    open={allPlanned}
-                    count={plan.items.length - planFold}
-                    onPress={() => {
-                      tick();
-                      setAllPlanned((v) => !v);
-                    }}
-                  />
-                </View>
+                  <Text
+                    style={{ fontSize: 9.5, color: d.net > 0 ? theme.positive : theme.textMuted, marginTop: 1 }}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                  >
+                    {d.net > 0 ? '+' : d.net < 0 ? '−' : ''}
+                    {mask(Math.abs(d.net) >= 1000 ? `${(Math.abs(d.net) / 1000).toFixed(1)}k` : formatAmount(d.net).replace(/\.00$/, ''), 'all')}
+                  </Text>
+                </>
               ) : null}
+            </Pressable>
+          ))}
+        </View>
+        {spendingAccounts.length ? (
+          <Pressable onPress={() => router.push('/safe')} style={styles.projection}>
+            <Sparkline values={projection.points.map((p) => p.balance)} color={theme.textMuted} height={30} />
+            <View style={[styles.between, { marginTop: 2 }]}>
+              <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]}>
+                today {mask(formatAmount(projection.start))}
+              </Text>
+              <Text
+                style={[
+                  type.caption,
+                  { color: projection.lowest.balance < 0 ? theme.negative : theme.textFaint, letterSpacing: 0.2 },
+                ]}
+              >
+                lowest {projection.lowest.balance < 0 ? '−' : ''}
+                {mask(formatAmount(projection.lowest.balance))} on {formatShortDate(projection.lowest.date)}
+              </Text>
+            </View>
+          </Pressable>
+        ) : null}
+
+        {/* The old overview's numbers, kept compact: net worth, the period, month end. */}
+        <View style={styles.tiles}>
+          <Pressable
+            onPress={() => {
+              tick();
+              router.push('/insights');
+            }}
+            style={({ pressed }) => [styles.tile, { backgroundColor: theme.bgElevated, borderColor: theme.hairline, opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>Net worth</Text>
+            <Text style={[type.amount, { color: theme.text, fontSize: 19, marginTop: 4 }]} numberOfLines={1} adjustsFontSizeToFit>
+              {netWorth < 0 ? '−' : ''}
+              {mask(formatAmount(netWorth))}
+            </Text>
+            {hidden ? null : <Delta value={netChange} size="sm" showUnit={false} suffix={range.label.toLowerCase()} />}
+            <Text style={[type.caption, { color: theme.textFaint, marginTop: 6, letterSpacing: 0.2 }]} numberOfLines={1}>
+              in <Text style={{ color: theme.positive }}>{mask(formatAmount(period.income), 'all')}</Text> · out{' '}
+              <Text style={{ color: theme.negative }}>{mask(formatAmount(period.expense), 'all')}</Text>
+            </Text>
+            <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
+              net{' '}
+              <Text style={{ color: period.net < 0 ? theme.negative : theme.positive }}>
+                {period.net < 0 ? '−' : '+'}
+                {mask(formatAmount(period.net), 'all')}
+              </Text>
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              tick();
+              router.push({ pathname: '/insights', params: { focus: 'month-end' } });
+            }}
+            style={({ pressed }) => [styles.tile, { backgroundColor: theme.bgElevated, borderColor: theme.hairline, opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>Month end</Text>
+            {forecast ? (
+              <>
+                <Text
+                  style={[type.amount, { color: forecast.projectedNet < 0 ? theme.negative : theme.positive, fontSize: 19, marginTop: 4 }]}
+                  numberOfLines={1}
+                >
+                  {forecast.projectedNet < 0 ? '−' : '+'}
+                  {mask(formatAmount(forecast.projectedNet), 'all')}
+                </Text>
+                <Text style={[type.caption, { color: theme.textMuted, letterSpacing: 0.2 }]}>projected net</Text>
+                <Text style={[type.caption, { color: theme.textFaint, marginTop: 6, letterSpacing: 0.2 }]} numberOfLines={1}>
+                  spend {forecast.verdict === 'over' ? 'above' : forecast.verdict === 'under' ? 'below' : 'about'} usual
+                </Text>
+                <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
+                  {mask(formatAmount(forecast.projectedSpend), 'all')} vs {mask(formatAmount(forecast.lastMonthSpend), 'all')} last
+                </Text>
+              </>
+            ) : (
+              <Text style={[type.label, { color: theme.textFaint, marginTop: 4 }]}>No forecast yet</Text>
+            )}
+          </Pressable>
+        </View>
+
+        <Section
+          title={`Budgets · ${new Date().toLocaleDateString('en-GB', { month: 'long' })}`}
+          detail={progress.length > 3 ? `top 3 of ${progress.length}` : undefined}
+          action={progress.length || goalCount ? 'All pots →' : 'Set one'}
+          onAction={() => router.push({ pathname: '/plan', params: { view: 'pots' } })}
+        />
+        <Card>
+          {topBudgets.length ? (
+            <View style={{ gap: space.md }}>
+              {topBudgets.map((p) => (
+                <Pressable
+                  key={p.id}
+                  onPress={() => {
+                    tick();
+                    router.push({ pathname: '/pot/[id]', params: { id: p.id, kind: 'budget' } });
+                  }}
+                >
+                  <View style={styles.between}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm, flex: 1 }}>
+                      <Swatch color={categoryColor(theme, p.name, categoryByLabel.get(p.name)?.color ?? p.color)} />
+                      <Text style={[type.body, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
+                        {p.name}
+                      </Text>
+                    </View>
+                    <Text style={[type.label, { color: p.status === 'over' ? theme.negative : theme.textMuted }]}>
+                      {mask(formatAmount(p.current), 'all')} / {formatAmount(p.target)}
+                    </Text>
+                  </View>
+                  <Meter
+                    ratio={p.ratio}
+                    tone={p.status === 'over' ? 'over' : p.status === 'warn' ? 'warn' : 'ink'}
+                    height={5}
+                    style={{ marginTop: 6 }}
+                  />
+                  <Text style={[type.caption, { color: theme.textFaint, marginTop: 3, letterSpacing: 0.2 }]}>
+                    {p.status === 'over'
+                      ? `${mask(formatAmount(-p.remaining), 'all')} over`
+                      : `${mask(formatAmount(p.remaining), 'all')} left · ${mask(formatAmount(p.kind === 'budget' ? p.budget.perDayLeft : 0), 'all')} a day for ${p.kind === 'budget' ? p.budget.daysLeft : 0} d`}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           ) : (
-            <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>
-              Nothing planned yet. Add Lohn, Miete and your subscriptions under Plan — then this screen knows what is safe to spend before payday.
+            <Text style={[type.label, { color: theme.textFaint }]}>
+              No budgets yet. Put a cap on Essen gehen or Shopping and Today warns you the moment you pass it.
             </Text>
           )}
-        </Glass>
+        </Card>
 
-        {/* Accounts as ledger lines: name on the left, balance and its movement on the right. */}
-        <SectionHeading title="Accounts" />
-        <Glass style={styles.card}>
-          <View style={{ paddingVertical: space.xs }}>
-            {accounts.map((a, i) => {
-              const foreign = a.currency && a.currency !== prefs.currency;
-              return (
-                <View key={a.id}>
-                  {i > 0 ? (
-                    <View style={[styles.divider, { backgroundColor: theme.hairline, marginLeft: space.lg }]} />
-                  ) : null}
-                  <Pressable
-                    onPress={() => {
-                      tick();
-                      router.push({ pathname: '/transactions', params: { account: a.id } });
-                    }}
-                    style={({ pressed }) => [styles.accountRow, { opacity: pressed ? 0.6 : 1 }]}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${a.accountName} transactions`}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[type.body, { color: theme.text }]} numberOfLines={1}>
-                        {a.accountName}
-                      </Text>
-                      {foreign && a.baseBalance != null ? (
-                        <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]}>
-                          ≈ {mask(formatAmount(a.baseBalance))} {prefs.currency}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                      <Text style={[type.amount, { color: theme.text }]}>
-                        {mask(formatAmount(a.currentBalance ?? 0))}
-                        {foreign ? <Text style={[type.caption, { color: theme.textFaint }]}> {a.currency}</Text> : null}
-                      </Text>
-                      {hidden ? null : <Delta value={accountDelta(a, transactions, range)} size="sm" />}
-                    </View>
-                    <Ionicons name="chevron-forward" size={14} color={theme.textFaint} />
-                  </Pressable>
-                </View>
-              );
-            })}
-            {accounts.length === 0 ? (
-              <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>
-                No accounts yet — add one in Settings.
-              </Text>
-            ) : null}
-          </View>
-        </Glass>
-
-        {/* Recent activity */}
-        <SectionHeading
-          title="Recent"
-          action="See all"
-          onAction={() => router.push('/transactions')}
-        />
-        <Glass style={styles.card}>
-          <View style={{ paddingVertical: space.xs }}>
-            {recent.map((tx, i) => (
-              <View key={tx.id}>
-                {i > 0 ? (
-                  <View style={[styles.divider, { backgroundColor: theme.hairline, marginLeft: 64 }]} />
-                ) : null}
-                <TransactionRow
-                  tx={tx}
-                  category={categoryByLabel.get(tx.categoryLabel ?? '')}
-                  accountName={accountById.get(tx.userAccountId ?? '')}
-                  showAccount={accounts.length > 1}
-                  onPress={() => router.push({ pathname: '/entry', params: { id: tx.id } })}
-                  onDelete={() => deleteTransaction(tx)}
-                />
-              </View>
-            ))}
-            {recent.length === 0 ? (
-              <View style={styles.empty}>
-                <Ionicons name="receipt-outline" size={22} color={theme.textFaint} />
-                <Text style={[type.label, { color: theme.textFaint, marginTop: space.sm }]}>
-                  Nothing logged yet. Tap + to start.
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        </Glass>
+        <Section title={recent.title} action="All activity →" onAction={() => router.push('/activity')} />
+        <Card padded={false}>
+          {recent.rows.map((tx, i) => (
+            <View key={tx.id}>
+              {i > 0 ? <Divider inset={64} /> : null}
+              <TransactionRow
+                tx={tx}
+                category={categoryByLabel.get(tx.categoryLabel ?? '')}
+                accountName={accountName.get(tx.userAccountId ?? '')}
+                showAccount={accounts.length > 1}
+                onPress={() => router.push({ pathname: '/entry', params: { id: tx.id } })}
+                onDelete={() => deleteTransaction(tx)}
+              />
+            </View>
+          ))}
+          {recent.rows.length === 0 ? (
+            <Text style={[type.label, { color: theme.textFaint, padding: space.lg }]}>Nothing logged yet. Tap + to start.</Text>
+          ) : null}
+        </Card>
       </ScrollView>
     </Screen>
   );
 }
 
-/** "TODAY", "TOMORROW", "FRI 23" within the week, "23 NOV" beyond it. */
-function dayLabel(iso: string): string {
-  const rel = relativeDays(iso);
-  if (rel === 'today' || rel === 'tomorrow') return rel.toUpperCase();
-  const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
-  const withinWeek = d.getTime() - Date.now() < 6 * 86_400_000;
-  return d
-    .toLocaleDateString('en-GB', withinWeek ? { weekday: 'short', day: 'numeric' } : { day: 'numeric', month: 'short' })
-    .toUpperCase();
+type Router = ReturnType<typeof useRouter>;
+
+function openItem(item: NeedsYouItem, router: Router) {
+  switch (item.kind) {
+    case 'overdue':
+      router.push(`/planned/${item.occurrence.plannedId}`);
+      return;
+    case 'uncategorised':
+      router.push({ pathname: '/activity', params: { uncategorised: '1' } });
+      return;
+    case 'budgetOver':
+      router.push({ pathname: '/pot/[id]', params: { id: item.budget.budgetId, kind: 'budget' } });
+      return;
+    case 'reconcile':
+      router.push({ pathname: '/account/[id]', params: { id: item.account.id, reconcile: '1' } });
+      return;
+    case 'monthClose':
+      router.push({ pathname: '/statement', params: { month: item.month } });
+  }
 }
 
-function shiftIso(iso: string, days: number): string {
-  const d = new Date(`${iso.slice(0, 10)}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function PlanAction({ label, icon, onPress }: { label: string; icon: string; onPress: () => void }) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      hitSlop={4}
-      style={({ pressed }) => [styles.planAction, { borderColor: theme.hairlineStrong, opacity: pressed ? 0.6 : 1 }]}
-    >
-      <Ionicons name={icon as never} size={13} color={theme.textMuted} />
-      <Text style={[type.label, { color: theme.text }]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function BudgetRow({ p, color }: { p: BudgetProgress; color: string }) {
-  const theme = useTheme();
-  const { mask } = usePreferences();
-  const over = isOver(p);
-  const ratio = p.effectiveLimit > 0 ? p.spentAmount / p.effectiveLimit : 1;
-  // Red only once the cap is passed; amber while spending runs ahead of the calendar.
-  const fill = over ? theme.negative : p.pace === 'over' ? theme.accent : theme.text;
-  return (
-    <View>
-      <View style={styles.between}>
-        <View style={[styles.flowLabel, { flex: 1 }]}>
-          <View style={[styles.swatch, { backgroundColor: color }]} />
-          <Text style={[type.body, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
-            {p.categoryLabel}
-          </Text>
-        </View>
-        <Text style={[type.label, { color: over ? theme.negative : theme.textMuted }]}>
-          {over
-            ? `${mask(formatAmount(overBy(p)), 'all')} over`
-            : `${mask(formatAmount(p.effectiveLimit - p.spentAmount), 'all')} left`}
-        </Text>
-      </View>
-      <View style={[styles.track, { backgroundColor: theme.keypad, marginTop: 6 }]}>
-        <View style={[styles.fill, { width: `${Math.max(2, Math.min(100, ratio * 100))}%`, backgroundColor: fill }]} />
-      </View>
-      <Text style={[type.caption, { color: theme.textFaint, marginTop: 4, letterSpacing: 0.2 }]}>
-        {mask(formatAmount(p.spentAmount), 'all')} of {formatAmount(p.effectiveLimit)}
-        {over
-          ? ` · ${Math.round(ratio * 100)}%`
-          : p.daysLeft > 0
-            ? ` · ${mask(formatAmount(p.perDayLeft), 'all')} a day for ${p.daysLeft} days`
-            : ''}
-      </Text>
-    </View>
-  );
-}
-
-function Tile({
-  label,
-  value,
-  hint,
-  tone,
-  onPress,
+function InboxRow({
+  item,
+  mask,
+  onSnooze,
+  onOpen,
+  plan,
 }: {
-  label: string;
-  value: string;
-  hint: string;
-  tone?: 'positive' | 'negative';
-  onPress: () => void;
+  item: NeedsYouItem;
+  mask: (s: string, level?: 'balances' | 'all') => string;
+  onSnooze: () => void;
+  onOpen: () => void;
+  plan: ReturnType<typeof usePlanActions>;
 }) {
   const theme = useTheme();
-  const { tick } = usePreferences();
-  const color = tone === 'negative' ? theme.negative : tone === 'positive' ? theme.positive : theme.text;
-  return (
-    <Pressable
-      onPress={() => {
-        tick();
-        onPress();
-      }}
-      style={({ pressed }) => [
-        styles.tile,
-        {
-          borderColor: tone === 'negative' ? theme.negative : theme.hairline,
-          backgroundColor: theme.bgElevated,
-          opacity: pressed ? 0.7 : 1,
-        },
-      ]}
-      accessibilityRole="button"
-      accessibilityLabel={`${label}: ${value}, ${hint}`}
-    >
-      <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>{label}</Text>
-      <Text style={[type.amount, { color, marginTop: 6 }]} numberOfLines={1} adjustsFontSizeToFit>
-        {value}
-      </Text>
-      <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]} numberOfLines={1}>
-        {hint}
-      </Text>
-    </Pressable>
-  );
-}
+  let dot = theme.textFaint;
+  let title = '';
+  let sub = '';
+  let action: React.ReactNode = null;
 
-function MoreToggle({ open, count, onPress }: { open: boolean; count: number; onPress: () => void }) {
-  const theme = useTheme();
-  return (
-    <Pressable onPress={onPress} hitSlop={8} style={styles.more}>
-      <Text style={[type.label, { color: theme.textMuted }]}>{open ? 'Show less' : `${count} more`}</Text>
-      <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={13} color={theme.textFaint} />
-    </Pressable>
-  );
-}
+  switch (item.kind) {
+    case 'overdue': {
+      const o = item.occurrence;
+      dot = theme.negative;
+      title = `${o.name} · ${item.daysLate === 0 ? 'due today' : item.daysLate === 1 ? 'due yesterday' : `${item.daysLate} d late`}`;
+      sub = `${o.kind === 'INCOME' ? '+' : '−'}${mask(formatAmount(o.amount), 'all')} · ${o.toAccountName ? `${o.accountName} → ${o.toAccountName}` : o.accountName}`;
+      action = <Btn small primary label="Book" onPress={() => void plan.book(o)} />;
+      break;
+    }
+    case 'uncategorised':
+      dot = theme.accent;
+      title = `${item.count} ${item.count === 1 ? 'entry' : 'entries'} without category`;
+      sub = `${mask(formatAmount(item.total), 'all')} in total`;
+      action = <Btn small label="Sort" onPress={onOpen} />;
+      break;
+    case 'budgetOver':
+      dot = theme.negative;
+      title = `${item.budget.categoryLabel} over budget`;
+      sub = `${mask(formatAmount(item.over), 'all')} over · ${formatAmount(item.budget.spentAmount)} of ${formatAmount(item.budget.effectiveLimit)}`;
+      action = <Btn small label="Look" onPress={onOpen} />;
+      break;
+    case 'reconcile':
+      dot = theme.textFaint;
+      title =
+        item.daysSince === null
+          ? `${item.account.accountName} never checked`
+          : `${item.account.accountName} not checked for ${item.daysSince} d`;
+      sub = `balance here ${mask(formatAmount(item.account.currentBalance))} · does the bank agree?`;
+      action = <Btn small label={/cash|portemonnaie|bar/i.test(item.account.accountName) ? 'Count' : 'Check'} onPress={onOpen} />;
+      break;
+    case 'monthClose':
+      dot = theme.accent;
+      title = `${new Date(`${item.from}T12:00:00`).toLocaleDateString('en-GB', { month: 'long' })} closed`;
+      sub = `spent ${mask(formatAmount(item.spent), 'all')}${item.change !== null ? ` · ${item.change > 0 ? '+' : '−'}${Math.abs(Math.round(item.change))}% vs month before` : ''}${item.topCategories.length ? ` · ${item.topCategories.map((c) => c.label).join(', ')}` : ''}${item.budgetsHit.length ? ` · ${item.budgetsHit.length} budget${item.budgetsHit.length === 1 ? '' : 's'} hit` : ''}`;
+      action = <Btn small label="Statement" onPress={onOpen} />;
+      break;
+  }
 
-function SectionHeading({
-  title,
-  detail,
-  detailColor,
-  action,
-  onAction,
-}: {
-  title: string;
-  detail?: string;
-  detailColor?: string;
-  action?: string;
-  onAction?: () => void;
-}) {
-  const theme = useTheme();
   return (
-    <View style={styles.sectionHeading}>
-      <View style={styles.sectionTitle}>
-        <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>
-          {title}
-        </Text>
-        {detail ? (
-          <Text style={[type.caption, { color: detailColor ?? theme.textMuted, letterSpacing: 0.2 }]} numberOfLines={1}>
-            {detail}
+    <View style={{ paddingHorizontal: space.lg, paddingVertical: space.md }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.md }}>
+        <View style={[styles.dot, { backgroundColor: dot }]} />
+        <Pressable onPress={onOpen} style={{ flex: 1 }} accessibilityRole="button">
+          <Text style={[type.label, { color: theme.text }]} numberOfLines={1}>
+            {title}
           </Text>
-        ) : null}
-      </View>
-      {action ? (
-        <Pressable onPress={onAction} hitSlop={8}>
-          <Text style={[type.label, { color: theme.textMuted }]}>{action}</Text>
+          <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2, marginTop: 1 }]} numberOfLines={2}>
+            {sub}
+          </Text>
         </Pressable>
+        {action}
+        <Pressable onPress={onSnooze} hitSlop={8} accessibilityRole="button" accessibilityLabel="Snooze until tomorrow">
+          <Ionicons name="alarm-outline" size={17} color={theme.textFaint} />
+        </Pressable>
+      </View>
+      {item.kind === 'overdue' ? (
+        <View style={styles.subActions}>
+          <Btn small label="Skip" icon="play-skip-forward-outline" onPress={() => void plan.skip(item.occurrence)} />
+          <Btn small label="+1 week" icon="arrow-forward-outline" onPress={() => void plan.postpone(item.occurrence, 7)} />
+        </View>
       ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  error: { paddingHorizontal: space.xl, marginBottom: space.sm },
-  hero: { paddingHorizontal: space.xl, marginBottom: space.xl },
-  timeframeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  timeframeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: space.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-  },
-  heroAmount: { flexDirection: 'row', alignItems: 'flex-end', marginTop: space.sm },
-  card: { marginHorizontal: space.lg },
-  tiles: { flexDirection: 'row', gap: space.sm, paddingHorizontal: space.lg },
-  tile: { flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.lg, padding: space.md },
-  cardInner: { padding: space.lg },
-  between: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    gap: space.sm,
-  },
-  flowLabel: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  swatch: { width: 8, height: 8, borderRadius: 2 },
-  track: { height: 4, borderRadius: radius.pill, overflow: 'hidden' },
-  fill: { height: '100%', borderRadius: radius.pill },
-  more: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  sectionHeading: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: space.xl,
-    marginTop: space.xl,
-    marginBottom: space.md,
-  },
-  sectionTitle: { flexDirection: 'row', alignItems: 'baseline', gap: space.sm, flex: 1 },
-  accountRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingVertical: space.md },
-  divider: { height: StyleSheet.hairlineWidth },
-  upRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: space.md },
-  planActions: { flexDirection: 'row', gap: space.sm, paddingLeft: 96, paddingRight: space.lg, paddingBottom: space.md },
-  planAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+  top: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.xl },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 4, borderRadius: radius.pill },
+  error: { paddingHorizontal: space.xl, marginTop: space.sm },
+  hero: { paddingHorizontal: space.xl, marginTop: space.lg },
+  heroAmount: { flexDirection: 'row', alignItems: 'flex-end', marginTop: space.xs },
+  between: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: space.sm },
+  accounts: { paddingHorizontal: space.lg, gap: space.sm, paddingTop: space.lg },
+  account: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.md, paddingHorizontal: space.md, paddingVertical: space.sm, minWidth: 96 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  subActions: { flexDirection: 'row', gap: space.sm, marginTop: space.sm, paddingLeft: 20 },
+  week: { flexDirection: 'row', gap: 4, paddingHorizontal: space.lg },
+  day: {
+    flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.pill,
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
+    borderRadius: radius.sm + 2,
+    paddingTop: 6,
+    paddingBottom: 5,
+    alignItems: 'center',
+    minHeight: 64,
   },
-  bookBtn: { borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4, marginLeft: 4 },
-  empty: { alignItems: 'center', paddingVertical: space.xl },
+  projection: { paddingHorizontal: space.xl, marginTop: space.md },
+  tiles: { flexDirection: 'row', gap: space.sm, paddingHorizontal: space.lg, marginTop: space.xl },
+  tile: { flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.lg, padding: space.md },
 });

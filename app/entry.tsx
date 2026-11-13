@@ -31,7 +31,7 @@ export default function Entry() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { id, mode: modeParam } = useLocalSearchParams<{ id?: string; mode?: string }>();
   const { accounts, categories, transactions, mutate, token } = useApp();
   const { prefs } = usePreferences();
   const toast = useToast();
@@ -53,7 +53,7 @@ export default function Entry() {
   }, [editing, transactions]);
 
   const [mode, setMode] = useState<Mode>(() => {
-    if (!editing) return 'EXPENSE';
+    if (!editing) return modeParam === 'TRANSFER' || modeParam === 'INCOME' ? modeParam : 'EXPENSE';
     if (isTransfer(editing.kind)) return 'TRANSFER';
     return editing.kind === 'INCOME' ? 'INCOME' : 'EXPENSE';
   });
