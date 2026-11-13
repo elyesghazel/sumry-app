@@ -3,19 +3,11 @@ import { AppState, useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { Theme, ThemeMode, resolveTheme } from './theme';
+import { TIMEFRAMES, type Timeframe } from './core';
 
 const KEY = 'sumry.preferences.v1';
 
-export type Timeframe = '7d' | '30d' | 'month' | '3m' | '6m' | 'year';
-
-export const TIMEFRAMES: { key: Timeframe; label: string }[] = [
-  { key: '7d', label: '7 days' },
-  { key: '30d', label: '30 days' },
-  { key: 'month', label: 'This month' },
-  { key: '3m', label: '3 months' },
-  { key: '6m', label: '6 months' },
-  { key: 'year', label: 'This year' },
-];
+export { TIMEFRAMES, type Timeframe };
 
 /** Analytics cards the user can switch on and off, in display order. */
 export const INSIGHT_CARDS = [

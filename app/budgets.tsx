@@ -8,9 +8,9 @@ import { Glass } from '../src/components/Glass';
 import { useToast } from '../src/components/Toast';
 import { useDestructiveAction } from '../src/components/ConfirmDialog';
 import { useApp } from '../src/store';
-import { api, Budget, BudgetPeriod } from '../src/api';
+import { Budget, BudgetPeriod, formatAmount } from '../src/core';
+import { api } from '../src/api';
 import { usePreferences, useTheme } from '../src/preferences';
-import { formatAmount } from '../src/format';
 import { categoryColor, radius, space, type } from '../src/theme';
 
 const PERIODS: { key: BudgetPeriod; label: string }[] = [
@@ -146,7 +146,7 @@ function Editor({ budget, onDone, onRemove }: { budget: Budget | null; onDone: (
     try {
       const sd = Math.min(28, Math.max(1, Number.parseInt(startDay) || 1));
       if (budget) await mutate((t) => api.updateBudget(t, budget.id, { limitAmount: value, period, rollover, startDay: sd }));
-      else await mutate((t) => api.createBudget(t, category!, value, { period, rollover, startDay: sd }));
+      else await mutate((t) => api.createBudget(t, { categoryLabel: category!, maxAmount: value, period, rollover, startDay: sd }));
       toast.success('Budget saved', `${category} · ${prefs.currency} ${formatAmount(value)}`);
       onDone();
     } catch (e) {

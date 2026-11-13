@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { formatAmount } from '../format';
+import { formatAmount } from '../core';
 import { type } from '../theme';
 import { usePreferences, useTheme } from '../preferences';
 

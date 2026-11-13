@@ -16,10 +16,6 @@ import { Glass } from '../../src/components/Glass';
 import { Delta, DeltaPercent } from '../../src/components/Delta';
 import { BarSeries, MonthColumns, RankedBars } from '../../src/components/charts';
 import { useApp } from '../../src/store';
-import { api } from '../../src/api';
-import { INSIGHT_CARDS, TIMEFRAMES, usePreferences, useTheme } from '../../src/preferences';
-import { useToast } from '../../src/components/Toast';
-import { useDestructiveAction } from '../../src/components/ConfirmDialog';
 import {
   accountDelta,
   categoryBreakdown,
@@ -30,8 +26,12 @@ import {
   resolveRange,
   spendBuckets,
   totals,
-} from '../../src/analytics';
-import { formatAmount } from '../../src/format';
+  formatAmount,
+} from '../../src/core';
+import { api } from '../../src/api';
+import { INSIGHT_CARDS, TIMEFRAMES, usePreferences, useTheme } from '../../src/preferences';
+import { useToast } from '../../src/components/Toast';
+import { useDestructiveAction } from '../../src/components/ConfirmDialog';
 import { categoryColor, radius, space, type } from '../../src/theme';
 
 export default function Insights() {
@@ -332,7 +332,7 @@ function Budgets({
     const value = Number.parseFloat(limit);
     if (!category || !Number.isFinite(value) || value <= 0) return;
     try {
-      await mutate((t) => api.createBudget(t, category, value));
+      await mutate((t) => api.createBudget(t, { categoryLabel: category, maxAmount: value }));
       setAdding(false);
       setCategory(null);
       setLimit('');

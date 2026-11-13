@@ -19,11 +19,12 @@ import {
   Me,
   Occurrence,
   Planned,
+  type Preferences as ServerPreferences,
   SafeToSpend,
   Subscriptions,
   Transaction,
-  api,
-} from './api';
+} from './core';
+import { api } from './api';
 
 const TOKEN_KEY = 'sumry.token';
 
@@ -159,7 +160,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Keep the uploader in step with the current token.
   useEffect(() => {
-    registerSync(token ? (patch) => api.updatePreferences(token, patch) : null);
+    registerSync(token ? (patch) => api.updatePreferences(token, patch as Partial<ServerPreferences>) : null);
     return () => registerSync(null);
   }, [token, registerSync]);
 

@@ -3,7 +3,7 @@ import { LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-nati
 import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 import { useTheme } from '../preferences';
 import { radius, space, type } from '../theme';
-import { formatAmount } from '../format';
+import { formatAmount } from '../core';
 
 /**
  * Charts are drawn with thin marks, recessive axes and selective labelling: a value on
