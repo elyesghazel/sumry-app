@@ -7,6 +7,7 @@ import {
   formatAmount,
   formatTime,
   isTransfer,
+  maskIbansIn,
   signOf,
 } from '../core';
 import { categoryColor, radius, space, type } from '../theme';
@@ -22,6 +23,11 @@ type Props = {
   onPress?: () => void;
   /** When given, the row can be dragged left to reveal a delete action. */
   onDelete?: () => void;
+  onLongPress?: () => void;
+  /** Selection mode: true/false shows a check box instead of the category icon. */
+  selected?: boolean;
+  /** Shows the entry's date instead of its time, for lists not grouped by day. */
+  showDate?: boolean;
 };
 
 export function TransactionRow({
@@ -31,6 +37,9 @@ export function TransactionRow({
   showAccount,
   onPress,
   onDelete,
+  onLongPress,
+  selected,
+  showDate,
 }: Props) {
   const theme = useTheme();
   const { mask } = usePreferences();
@@ -43,7 +52,7 @@ export function TransactionRow({
       : 'Transfer in'
     : (tx.categoryLabel ?? 'Uncategorised');
 
-  const subtitle = [tx.description, showAccount ? accountName : null]
+  const subtitle = [tx.description ? maskIbansIn(tx.description) : null, showAccount ? accountName : null]
     .filter(Boolean)
     .join(' · ');
 
@@ -59,12 +68,17 @@ export function TransactionRow({
   const row = (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       style={({ pressed }) => [styles.row, pressed && onPress ? { opacity: 0.6 } : null]}
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={`${title}, ${sign > 0 ? 'plus' : 'minus'} ${formatAmount(tx.amount)}`}
     >
-      <View style={[styles.icon, { backgroundColor: theme.keypad }]}>
-        <Ionicons name={iconName} size={17} color={tint} />
+      <View style={[styles.icon, { backgroundColor: selected ? theme.text : theme.keypad }]}>
+        {selected === undefined ? (
+          <Ionicons name={iconName} size={17} color={tint} />
+        ) : (
+          <Ionicons name={selected ? 'checkmark' : 'ellipse-outline'} size={17} color={selected ? theme.bg : theme.textFaint} />
+        )}
       </View>
 
       <View style={styles.body}>
@@ -84,13 +98,15 @@ export function TransactionRow({
           {mask(formatAmount(tx.amount), 'all')}
         </Text>
         <Text style={[type.caption, { color: theme.textFaint, marginTop: 2 }]}>
-          {formatTime(new Date(tx.date))}
+          {showDate
+            ? new Date(tx.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+            : formatTime(new Date(tx.date))}
         </Text>
       </View>
     </Pressable>
   );
 
-  if (!onDelete) return row;
+  if (!onDelete || selected !== undefined) return row;
   return <SwipeableRow onDelete={onDelete}>{row}</SwipeableRow>;
 }
 

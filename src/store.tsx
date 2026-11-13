@@ -19,6 +19,7 @@ import {
   Me,
   Occurrence,
   Planned,
+  Rule,
   type Preferences as ServerPreferences,
   SafeToSpend,
   Subscriptions,
@@ -46,6 +47,7 @@ type Ctx = {
   goals: Goal[];
   forecast: Forecast | null;
   subscriptions: Subscriptions | null;
+  rules: Rule[];
 
   refreshing: boolean;
   error: string | null;
@@ -82,6 +84,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [subscriptions, setSubscriptions] = useState<Subscriptions | null>(null);
+  const [rules, setRules] = useState<Rule[]>([]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,6 +104,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setGoals([]);
     setForecast(null);
     setSubscriptions(null);
+    setRules([]);
     setStatus('signed-out');
   }, []);
 
@@ -108,7 +112,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     async (t: string) => {
       setRefreshing(true);
       try {
-        const [acc, cat, tx, bud, prog, remote, plan, up, sts, gls, fc, subs] = await Promise.all([
+        const [acc, cat, tx, bud, prog, remote, plan, up, sts, gls, fc, subs, rls] = await Promise.all([
           api.accounts(t),
           api.categories(t),
           api.transactions(t),
@@ -117,11 +121,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           // Everything below is nice-to-have: a failure there must not blank the dashboard.
           api.preferences(t).catch(() => null),
           api.planned(t).catch(() => [] as Planned[]),
-          api.upcoming(t).catch(() => [] as Occurrence[]),
+          api.upcoming(t, 60).catch(() => [] as Occurrence[]),
           api.safeToSpend(t).catch(() => null),
           api.goals(t).catch(() => [] as Goal[]),
           api.forecast(t).catch(() => null),
           api.subscriptions(t).catch(() => null),
+          api.rules(t).catch(() => [] as Rule[]),
         ]);
         setAccounts(acc);
         setCategories(cat.filter((c) => c.isActive !== false));
@@ -134,6 +139,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setGoals(gls);
         setForecast(fc);
         setSubscriptions(subs);
+        setRules(rls);
         if (remote) {
           applyRemote({
             themeMode: remote.theme as never,
@@ -256,6 +262,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       goals,
       forecast,
       subscriptions,
+      rules,
       refreshing,
       error,
       signIn,
@@ -280,6 +287,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       goals,
       forecast,
       subscriptions,
+      rules,
       refreshing,
       error,
       signIn,
