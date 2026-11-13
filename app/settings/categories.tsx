@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,16 +10,65 @@ import { Category } from '../../src/core';
 import { api } from '../../src/api';
 import { useTheme } from '../../src/preferences';
 import { useToast } from '../../src/components/Toast';
-import { useDestructiveAction } from '../../src/components/ConfirmDialog';
+import { useConfirm, useDestructiveAction } from '../../src/components/ConfirmDialog';
+import { Btn, Card, Field } from '../../src/components/ui';
 import { categoryColor, radius, space, type } from '../../src/theme';
 
 export default function Categories() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { categories, transactions, mutate } = useApp();
+  const { categories, transactions, rules, mutate, token } = useApp();
+  const [note, setNote] = useState('');
+  const [tryResult, setTryResult] = useState<{ note: string; label: string | null; pattern: string | null } | null>(null);
+  const [applying, setApplying] = useState(false);
+
+  const ruleCount = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rules) m.set(r.categoryLabel, (m.get(r.categoryLabel) ?? 0) + 1);
+    return m;
+  }, [rules]);
+
+  const tryNote = async () => {
+    if (!token || !note.trim()) return;
+    try {
+      const res = await api.testRule(token, note.trim());
+      setTryResult({ note: note.trim(), label: res.categoryLabel, pattern: res.rule?.pattern ?? null });
+    } catch (e) {
+      toast.error('Could not test', e instanceof Error ? e.message : 'Unknown error');
+    }
+  };
+
+  const applyRules = async () => {
+    if (!token) return;
+    setApplying(true);
+    try {
+      const dry = await api.applyRules(token, true);
+      if (!dry.changed) {
+        toast.success('Nothing to change', `${dry.examined} entries already match the rules.`);
+        return;
+      }
+      const ok = await confirm({
+        title: `Recategorise ${dry.changed} entries?`,
+        message: dry.changes
+          .slice(0, 5)
+          .map((c) => `${c.description ?? '—'}: ${c.fromCategory ?? 'none'} → ${c.toCategory}`)
+          .join('\n') + (dry.changed > 5 ? `\n… and ${dry.changed - 5} more` : ''),
+        confirmLabel: 'Apply',
+        icon: 'git-branch-outline',
+      });
+      if (!ok) return;
+      const res = await mutate((t) => api.applyRules(t, false));
+      toast.success(`${res.changed} entries recategorised`);
+    } catch (e) {
+      toast.error('Could not apply rules', e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setApplying(false);
+    }
+  };
   const toast = useToast();
   const confirmDestructive = useDestructiveAction();
+  const confirm = useConfirm();
 
   // How often each category is used — deleting an unused one is safe, deleting a
   // heavily-used one is worth warning about.
@@ -67,13 +116,31 @@ export default function Categories() {
         <Pressable onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="chevron-back" size={24} color={theme.textMuted} />
         </Pressable>
-        <Text style={[type.title, { color: theme.text }]}>Categories</Text>
+        <Text style={[type.title, { color: theme.text }]}>Categories & rules</Text>
         <Pressable onPress={() => router.push('/settings/category')} hitSlop={10}>
           <Ionicons name="add" size={24} color={theme.text} />
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + space.xxl }} keyboardShouldPersistTaps="handled">
+        <Card>
+          <Text style={[type.caption, { color: theme.textFaint }]}>TRY A NOTE</Text>
+          <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.sm }}>
+            <Field value={note} onChangeText={setNote} placeholder="e.g. Migros Bahnhof" autoCapitalize="none" onSubmitEditing={tryNote} returnKeyType="search" style={{ flex: 1 }} />
+            <Btn primary label="Try" disabled={!note.trim()} onPress={tryNote} />
+          </View>
+          {tryResult ? (
+            <Text style={[type.label, { color: tryResult.label ? theme.text : theme.textFaint, marginTop: space.sm }]}>
+              {tryResult.label ? `“${tryResult.note}” → ${tryResult.label}${tryResult.pattern ? ` (rule “${tryResult.pattern}”)` : ''}` : `No rule matches “${tryResult.note}”.`}
+            </Text>
+          ) : null}
+          <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.md }}>
+            <Btn small icon="git-branch-outline" label={applying ? 'Checking…' : 'Apply rules to past entries'} disabled={applying} onPress={applyRules} />
+          </View>
+          <Text style={[type.caption, { color: theme.textFaint, marginTop: space.sm, letterSpacing: 0.2 }]}>
+            {rules.length} rules. Open a category to add or remove its rules.
+          </Text>
+        </Card>
         {groups.map(([group, items]) => (
           <View key={group}>
             <Text
@@ -99,7 +166,7 @@ export default function Categories() {
                     ) : null}
                     <Pressable
                       onPress={() =>
-                        router.push({ pathname: '/settings/category', params: { label: c.label } })
+                        router.push({ pathname: '/category/[label]', params: { label: c.label } })
                       }
                       onLongPress={() => remove(c)}
                       style={({ pressed }) => [styles.row, pressed ? { opacity: 0.6 } : null]}
@@ -122,7 +189,7 @@ export default function Categories() {
                         </Text>
                         <Text style={[type.caption, { color: theme.textFaint, marginTop: 2 }]}>
                           {c.categoryType === 'INCOME' ? 'Income' : 'Expense'} ·{' '}
-                          {usage.get(c.label) ?? 0} used
+                          {usage.get(c.label) ?? 0} used · {ruleCount.get(c.label) ?? 0} rules
                         </Text>
                       </View>
                       <Ionicons name="chevron-forward" size={16} color={theme.textFaint} />
@@ -140,7 +207,7 @@ export default function Categories() {
             { color: theme.textFaint, paddingHorizontal: space.xl, marginTop: space.lg },
           ]}
         >
-          Tap to edit, long-press to delete.
+          Tap for trend, rules and entries; edit from there. Long-press to delete.
         </Text>
       </ScrollView>
     </Screen>
