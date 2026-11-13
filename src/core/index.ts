@@ -1,4 +1,4 @@
-// generated - edit in sumry/web core/ and run scripts/sync-core.sh. sha256:05e10e9cbf87f933de0c08778f2b8d7fce3baf5d68726559deab2ec1265b0fd1
+// generated - edit in sumry/web core/ and run scripts/sync-core.sh. sha256:90e9d4fc682a84ba8a38986e938fcf9fd352775249413d68f1539edbb352782f
 /**
  * Sumry shared core: API client, types, analytics, formatting and the derived numbers both
  * apps show. Pure TypeScript - no React, DOM or React Native imports. The web repo holds
@@ -11,3 +11,4 @@ export * from './analytics';
 export * from './today';
 export * from './pots';
 export * from './iban';
+export * from './importing';
