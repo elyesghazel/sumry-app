@@ -17,8 +17,10 @@ import {
   importFormatFor,
   maskIbansIn,
   reconcileOffer,
+  rowsForCheck,
   splitImportWarnings,
   statementFileKind,
+  type ImportCheck,
   type ImportPreview,
   type ImportRow,
 } from '../src/core';
@@ -40,7 +42,7 @@ export default function Import() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ account?: string }>();
-  const { accounts, token, mutate } = useApp();
+  const { accounts, transactions, token, mutate } = useApp();
   const { prefs, tick, mask } = usePreferences();
   const toast = useToast();
   const confirm = useConfirm();
@@ -52,6 +54,9 @@ export default function Import() {
   const [busy, setBusy] = useState<null | 'reading' | 'booking'>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<number | null>(null);
+  const [check, setCheck] = useState<ImportCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [removed, setRemoved] = useState<string[]>([]);
 
   const account = accounts.find((a) => a.id === accountId);
   const included = rows.filter((r) => r.include);
@@ -83,11 +88,63 @@ export default function Import() {
           : { accountId, format, fileBase64: await readBase64(asset), fileName: asset.name };
       const p = await api.importPreview(token, input);
       setPreview(p);
+      setCheck(null);
+      setRemoved([]);
       setRows(p.rows.map((r) => ({ ...r, include: !r.duplicate })));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not read the statement');
     } finally {
       setBusy(null);
+    }
+  };
+
+  /** Claude looks at the rows nothing matched; its verdicts only pre-set the choices. */
+  const askClaude = async () => {
+    if (!token || !preview) return;
+    const open = rowsForCheck(preview.rows);
+    if (!open.length) return;
+    tick();
+    setChecking(true);
+    try {
+      const res = await api.importCheck(token, {
+        accountId: preview.accountId,
+        rows: open,
+        matchedIds: preview.rows.flatMap((r) => r.matchIds ?? (r.duplicateOfId ? [r.duplicateOfId] : [])),
+        statementFrom: preview.statementFrom ?? null,
+        statementTo: preview.statementTo ?? null,
+      });
+      setCheck(res);
+      const byLine = new Map(res.suggestions.map((v) => [v.line, v]));
+      setRows((cur) =>
+        cur.map((r) => {
+          const v = byLine.get(r.line);
+          if (!v) return r;
+          if (v.verdict !== 'new') return { ...r, include: false };
+          return !r.categoryLabel && v.categoryLabel ? { ...r, categoryLabel: v.categoryLabel } : r;
+        }),
+      );
+    } catch (e) {
+      toast.error('Claude check failed', e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const removeAdjustment = async (id: string, label: string) => {
+    const ok = await confirm({
+      title: 'Remove this adjustment?',
+      message: `${label}\n\nOnly do this if you book the statement rows it covered, otherwise the balance is off again.`,
+      confirmLabel: 'Remove',
+      destructive: true,
+      icon: 'trash-outline',
+    });
+    if (!ok) return;
+    try {
+      await mutate((t) => api.deleteTransaction(t, id));
+      setRemoved((r) => [...r, id]);
+      toast.success('Adjustment removed');
+    } catch (e) {
+      toast.error('Could not remove it', e instanceof Error ? e.message : 'Unknown error');
     }
   };
 
@@ -144,6 +201,8 @@ export default function Import() {
   const warnings = preview?.warnings ?? [];
   const { notes: plain, diagnostics } = splitImportWarnings(warnings);
   const editingRow = editing !== null ? rows[editing] : null;
+  const verdicts = useMemo(() => new Map((check?.suggestions ?? []).map((v) => [v.line, v])), [check]);
+  const openCount = preview ? rowsForCheck(preview.rows).length : 0;
 
   return (
     <Screen>
@@ -174,7 +233,7 @@ export default function Import() {
             )}
           </View>
         </Card>
-        <Hint text="Nothing is booked until you confirm. IBANs in descriptions arrive masked. Up to 10 MB." />
+        <Hint text="Nothing is booked until you confirm. Rows with the same amount as an entry within 3 days count as already logged. IBANs arrive masked. Up to 10 MB." />
 
         {error ? (
           <Card style={{ marginTop: space.lg, borderColor: theme.negative }}>
@@ -193,7 +252,14 @@ export default function Import() {
               {preview.statementClosingBalance != null ? <KV label="Closing balance" value={mask(formatAmount(preview.statementClosingBalance))} /> : null}
               {account ? <KV label={`${account.accountName} now`} value={mask(formatAmount(account.currentBalance))} /> : null}
               <KV label="New" strong value={String(preview.newCount)} />
-              <KV label="Already booked" value={String(preview.duplicateCount)} />
+              <KV label="Already logged" value={String(preview.duplicateCount)} />
+              {preview.balanceOk != null ? (
+                <KV
+                  label="Rows add up"
+                  value={preview.balanceOk ? '✓ every booking read' : `✗ off by ${formatAmount((preview.statementClosingBalance ?? 0) - (preview.computedClosingBalance ?? 0))}`}
+                  color={preview.balanceOk ? theme.positive : theme.negative}
+                />
+              ) : null}
               <KV label="Without category" value={String(preview.uncategorisedCount)} color={preview.uncategorisedCount ? theme.accent : undefined} />
             </Card>
 
@@ -204,6 +270,33 @@ export default function Import() {
                     {maskIbansIn(w)}
                   </Text>
                 ))}
+              </Card>
+            ) : null}
+
+            {preview.aiCheckAvailable && openCount > 0 ? (
+              <Card style={{ marginTop: space.sm, gap: space.sm }}>
+                <Text style={[type.label, { color: theme.text }]}>
+                  {check ? check.summary || 'Claude checked the open rows.' : `${openCount} rows matched nothing. Claude can compare them with your entries around this period.`}
+                </Text>
+                {!check ? (
+                  <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]}>
+                    Sends the open rows (IBANs masked) and your entries on this account from that period. Nothing changes without you.
+                  </Text>
+                ) : null}
+                {check?.adjustments
+                  .filter((a) => !removed.includes(a.id))
+                  .map((a) => {
+                    const t = transactions.find((x) => x.id === a.id);
+                    const label = t ? `${t.description || 'Abgleich'} · ${shortDay(t.date)} · ${formatAmount(t.amount)}` : 'An adjustment';
+                    return (
+                      <View key={a.id} style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: theme.hairline, paddingTop: space.sm, gap: 4 }}>
+                        <Text style={[type.label, { color: theme.accent }]}>Adjustment would count twice: {label}</Text>
+                        <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2 }]}>{a.note}</Text>
+                        <Btn small danger label="Remove adjustment" onPress={() => removeAdjustment(a.id, label)} />
+                      </View>
+                    );
+                  })}
+                <Btn small label={checking ? 'Claude is checking…' : check ? 'Check again' : 'Check with Claude'} disabled={checking || busy !== null} onPress={askClaude} />
               </Card>
             ) : null}
 
@@ -260,7 +353,19 @@ export default function Import() {
                         </Text>
                         <View style={{ flexDirection: 'row', gap: space.sm, alignItems: 'center', marginTop: 2 }}>
                           <Text style={[type.caption, { color: theme.textFaint }]}>{shortDay(r.date)}</Text>
-                          {r.duplicate ? <Text style={[type.caption, { color: theme.textFaint }]}>· already booked</Text> : null}
+                          {r.duplicate ? (
+                            <Text style={[type.caption, { color: theme.textFaint, letterSpacing: 0.2, flexShrink: 1 }]} numberOfLines={1}>
+                              · = {r.matchNote ?? 'already logged'}
+                            </Text>
+                          ) : null}
+                          {verdicts.get(r.line) ? (
+                            <Text
+                              style={[type.caption, { letterSpacing: 0.2, flexShrink: 1, color: verdicts.get(r.line)!.verdict === 'new' ? theme.positive : verdicts.get(r.line)!.verdict === 'logged' ? theme.accent : theme.negative }]}
+                              numberOfLines={1}
+                            >
+                              · Claude: {verdicts.get(r.line)!.verdict === 'new' ? 'new' : verdicts.get(r.line)!.verdict === 'logged' ? `logged, ${verdicts.get(r.line)!.reason}` : verdicts.get(r.line)!.reason}
+                            </Text>
+                          ) : null}
                           {r.currencyMismatch ? <Text style={[type.caption, { color: theme.negative }]}>· {r.currency}</Text> : null}
                           {transfer ? null : (
                             <Pressable
