@@ -6,7 +6,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { tokenStore } from './lib/secureStore';
 import { usePreferences } from './preferences';
 import {
   Account,
@@ -90,7 +90,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const clearSession = useCallback(async () => {
-    await SecureStore.deleteItemAsync(TOKEN_KEY).catch(() => {});
+    await tokenStore.remove(TOKEN_KEY).catch(() => {});
     setToken(null);
     setUser(null);
     setAccounts([]);
@@ -174,7 +174,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const stored = await SecureStore.getItemAsync(TOKEN_KEY).catch(() => null);
+      const stored = await tokenStore.get(TOKEN_KEY).catch(() => null);
       if (!stored) {
         if (!cancelled) setStatus('signed-out');
         return;
@@ -198,7 +198,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const signIn = useCallback(
     async (email: string, password: string) => {
       const { token: t } = await api.login(email.trim(), password);
-      await SecureStore.setItemAsync(TOKEN_KEY, t);
+      await tokenStore.set(TOKEN_KEY, t);
       const me = await api.me(t);
       setToken(t);
       setUser(me);
@@ -232,7 +232,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   );
 
   const adoptToken = useCallback(async (t: string) => {
-    await SecureStore.setItemAsync(TOKEN_KEY, t);
+    await tokenStore.set(TOKEN_KEY, t);
     setToken(t);
   }, []);
 
