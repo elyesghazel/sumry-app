@@ -17,7 +17,7 @@
     "android": {
       "package": "ch.sumry.app",
       "adaptiveIcon": {
-        "backgroundColor": "#F4F1EA",
+        "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -44,9 +44,9 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 160,
           "resizeMode": "contain",
-          "backgroundColor": "#F4F1EA",
+          "backgroundColor": "#000000",
           "dark": {
-            "backgroundColor": "#17150F"
+            "backgroundColor": "#000000"
           }
         }
       ],

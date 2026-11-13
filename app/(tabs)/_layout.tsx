@@ -34,7 +34,7 @@ export default function TabsLayout() {
           tabBarActiveTintColor: theme.text,
           tabBarInactiveTintColor: theme.textFaint,
           tabBarShowLabel: true,
-          tabBarLabelStyle: { fontFamily: 'Inter_500Medium', fontSize: 10 },
+          tabBarLabelStyle: { fontFamily: 'JetBrainsMono_500Medium', fontSize: 10 },
           sceneStyle: { backgroundColor: 'transparent' },
           tabBarStyle: {
             position: 'absolute',

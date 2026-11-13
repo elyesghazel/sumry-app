@@ -1,14 +1,6 @@
 import React from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  type TextInputProps,
-  View,
-  type StyleProp,
-  type ViewStyle,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, type TextInputProps, View, type StyleProp, type ViewStyle } from 'react-native';
+import { TextInput } from './TextInput';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -62,7 +54,7 @@ export function Header({
   );
 }
 
-/** Uppercase caption above a card, with an optional detail and a text action. */
+/** `// LABEL` caption above a card, with an optional detail and a text action. */
 export function Section({
   title,
   detail,
@@ -81,7 +73,10 @@ export function Section({
   return (
     <View style={styles.section}>
       <View style={styles.sectionTitle}>
-        <Text style={[type.caption, { color: theme.textFaint, textTransform: 'uppercase' }]}>{title}</Text>
+        <Text style={[type.caption, { color: theme.textFaint }]}>
+          <Text style={{ letterSpacing: 0 }}>{'// '}</Text>
+          <Text style={{ textTransform: 'uppercase' }}>{title}</Text>
+        </Text>
         {detail ? (
           <Text style={[type.caption, { color: detailColor ?? theme.textMuted, letterSpacing: 0.2 }]} numberOfLines={1}>
             {detail}
@@ -401,7 +396,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  btnSmallText: { fontSize: 11.5, fontFamily: 'Inter_600SemiBold' },
+  btnSmallText: { fontSize: 11.5, fontFamily: 'JetBrainsMono_600SemiBold' },
   kv: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingVertical: 3 },
   input: {
     borderWidth: StyleSheet.hairlineWidth,

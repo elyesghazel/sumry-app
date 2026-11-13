@@ -97,7 +97,9 @@ export function LockGate({ children }: { children: React.ReactNode }) {
           <Ionicons name="lock-closed-outline" size={30} color={theme.textMuted} />
         </View>
 
-        <Text style={[type.title, { color: theme.text, marginTop: space.xl }]}>Sumry</Text>
+        <Text style={[type.title, { color: theme.text, marginTop: space.xl }]}>
+              sumry<Text style={{ color: theme.accent }}>.</Text>
+            </Text>
         <Text
           style={[type.body, { color: theme.textMuted, marginTop: space.xs, textAlign: 'center' }]}
         >

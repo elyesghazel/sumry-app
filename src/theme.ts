@@ -1,7 +1,8 @@
 import { useColorScheme } from 'react-native';
 
 /**
- * Sumry's visual language: the ledger. Paper, ink, hairlines.
+ * Sumry in the eg. look (design.elyesghazel.ch): black page, JetBrains Mono, white for
+ * what matters, greys for the rest, a muted brick red for the one thing to look at.
  *
  * Two colour systems live here and they do different jobs.
  *
@@ -14,30 +15,12 @@ import { useColorScheme } from 'react-native';
  * what else is on screen or how the list is filtered.
  */
 
-const positive = { dark: '#7FB995', light: '#2F6B4F' };
-const negative = { dark: '#E0836F', light: '#A63D2F' };
+const positive = { dark: '#6CC28A', light: '#1E7A44' };
+const negative = { dark: '#FF5F56', light: '#D0201F' };
 
-const categoricalLight = [
-  '#9A6B1F', // ochre
-  '#B4553A', // terracotta
-  '#5B7A3A', // moss
-  '#4D6B86', // slate
-  '#7D5478', // plum
-  '#2F7D78', // teal
-  '#8A6A4B', // umber
-  '#A8566B', // rose
-];
+const categoricalLight = ['#0A0A0A', '#A94848', '#1F5FB4', '#1E7A44', '#8F5F00', '#707070', '#6B4C9A', '#B5B5B5'];
 
-const categoricalDark = [
-  '#D1A353',
-  '#E0836F',
-  '#9FBF6E',
-  '#8FB0CC',
-  '#C493BF',
-  '#6FC2BB',
-  '#C9A583',
-  '#E08AA2',
-];
+const categoricalDark = ['#FFFFFF', '#C47070', '#74A7E6', '#6CC28A', '#D9AD5B', '#A6A6A6', '#B08FD0', '#5F5F5F'];
 
 type Palette = {
   bg: string;
@@ -67,55 +50,55 @@ type Palette = {
 
 export const palette: { dark: Palette; light: Palette } = {
   light: {
-    bg: '#F4F1EA',
-    bgElevated: '#FBFAF6',
-    bgRecessed: '#EBE7DE',
-    hairline: 'rgba(26,24,20,0.14)',
-    hairlineStrong: 'rgba(26,24,20,0.36)',
+    bg: '#FAFAFA',
+    bgElevated: '#FFFFFF',
+    bgRecessed: '#F2F2F2',
+    hairline: '#D4D4D4',
+    hairlineStrong: '#888888',
 
-    text: '#1A1814',
-    textMuted: '#4F4A43',
-    textFaint: '#8B857B',
+    text: '#0A0A0A',
+    textMuted: '#555555',
+    textFaint: '#707070',
 
     positive: positive.light,
     negative: negative.light,
-    accent: '#9A6B1F',
+    accent: '#A94848',
 
-    keypad: '#EBE7DE',
+    keypad: '#EBEBEB',
     statusBar: 'dark',
     categorical: categoricalLight,
-    grid: 'rgba(26,24,20,0.12)',
+    grid: '#E3E3E3',
 
-    glass: '#FBFAF6',
-    glassStrong: '#FBFAF6',
-    gradientTop: '#F4F1EA',
-    gradientBottom: '#F4F1EA',
+    glass: '#FFFFFF',
+    glassStrong: '#FFFFFF',
+    gradientTop: '#FAFAFA',
+    gradientBottom: '#FAFAFA',
     blurTint: 'light',
   },
   dark: {
-    bg: '#17150F',
-    bgElevated: '#1E1B15',
-    bgRecessed: '#100F0B',
-    hairline: 'rgba(236,230,217,0.14)',
-    hairlineStrong: 'rgba(236,230,217,0.38)',
+    bg: '#000000',
+    bgElevated: '#0F0F0F',
+    bgRecessed: '#050505',
+    hairline: '#333333',
+    hairlineStrong: '#666666',
 
-    text: '#ECE6D9',
-    textMuted: '#B3AB9C',
-    textFaint: '#766F63',
+    text: '#FFFFFF',
+    textMuted: '#A6A6A6',
+    textFaint: '#8A8A8A',
 
     positive: positive.dark,
     negative: negative.dark,
-    accent: '#D1A353',
+    accent: '#C47070',
 
-    keypad: '#100F0B',
+    keypad: '#1A1A1A',
     statusBar: 'light',
     categorical: categoricalDark,
-    grid: 'rgba(236,230,217,0.12)',
+    grid: '#262626',
 
-    glass: '#1E1B15',
-    glassStrong: '#1E1B15',
-    gradientTop: '#17150F',
-    gradientBottom: '#17150F',
+    glass: '#0F0F0F',
+    glassStrong: '#0F0F0F',
+    gradientTop: '#000000',
+    gradientBottom: '#000000',
     blurTint: 'dark',
   },
 };
@@ -152,32 +135,34 @@ export function categoryColor(theme: Theme, key: string, explicit?: string | nul
 }
 
 /**
- * Fraunces carries the figures and titles, Inter everything else. Weights are referenced
- * by family name rather than fontWeight: on Android a numeric weight against a custom
- * family silently falls back to the system face, so each weight has to be its own family.
+ * JetBrains Mono everywhere, weight does the work. Weights are referenced by family name
+ * rather than fontWeight: on Android a numeric weight against a custom family silently
+ * falls back to the system face, so each weight has to be its own family. The serif keys
+ * stay so call sites don't change; they resolve to the heavier mono cuts.
  */
 export const font = {
-  regular: 'Inter_400Regular',
-  medium: 'Inter_500Medium',
-  semibold: 'Inter_600SemiBold',
-  light: 'Inter_400Regular',
-  serifLight: 'Fraunces_300Light',
-  serif: 'Fraunces_400Regular',
-  serifMedium: 'Fraunces_500Medium',
-  serifItalic: 'Fraunces_500Medium_Italic',
+  regular: 'JetBrainsMono_400Regular',
+  medium: 'JetBrainsMono_500Medium',
+  semibold: 'JetBrainsMono_600SemiBold',
+  light: 'JetBrainsMono_400Regular',
+  serifLight: 'JetBrainsMono_600SemiBold',
+  serif: 'JetBrainsMono_500Medium',
+  serifMedium: 'JetBrainsMono_600SemiBold',
+  serifItalic: 'JetBrainsMono_700Bold',
 };
 
 /** 4pt spacing scale. */
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 
-export const radius = { sm: 6, md: 10, lg: 12, pill: 999 };
+// Nearly square, as in eg.: nothing is pill-shaped except status dots.
+export const radius = { sm: 2, md: 4, lg: 4, pill: 2 };
 
 export const type = {
   // Tabular figures keep columns of money from jittering as digits change.
-  display: { fontSize: 46, fontFamily: font.serifLight, fontVariant: ['tabular-nums' as const], letterSpacing: -1 },
-  amount: { fontSize: 17, fontFamily: font.serif, fontVariant: ['tabular-nums' as const] },
-  title: { fontSize: 26, fontFamily: font.serif, letterSpacing: -0.3 },
-  body: { fontSize: 15, fontFamily: font.regular },
+  display: { fontSize: 40, fontFamily: font.serifLight, fontVariant: ['tabular-nums' as const], letterSpacing: -1.5 },
+  amount: { fontSize: 15, fontFamily: font.serif, fontVariant: ['tabular-nums' as const] },
+  title: { fontSize: 22, fontFamily: font.serifMedium, letterSpacing: -0.5 },
+  body: { fontSize: 14, fontFamily: font.regular },
   label: { fontSize: 13, fontFamily: font.medium },
-  caption: { fontSize: 11, fontFamily: font.medium, letterSpacing: 0.8 },
+  caption: { fontSize: 11, fontFamily: font.medium, letterSpacing: 2 },
 };

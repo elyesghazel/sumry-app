@@ -4,13 +4,12 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
-import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import {
-  Fraunces_300Light,
-  Fraunces_400Regular,
-  Fraunces_500Medium,
-  Fraunces_500Medium_Italic,
-} from '@expo-google-fonts/fraunces';
+  JetBrainsMono_400Regular,
+  JetBrainsMono_500Medium,
+  JetBrainsMono_600SemiBold,
+  JetBrainsMono_700Bold,
+} from '@expo-google-fonts/jetbrains-mono';
 import { AppProvider, useApp } from '../src/store';
 import { PreferencesProvider, useTheme } from '../src/preferences';
 import { Screen } from '../src/components/Screen';
@@ -52,13 +51,10 @@ function Splash() {
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Fraunces_300Light,
-    Fraunces_400Regular,
-    Fraunces_500Medium,
-    Fraunces_500Medium_Italic,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_500Medium,
+    JetBrainsMono_600SemiBold,
+    JetBrainsMono_700Bold,
   });
 
   // Holding the first frame avoids a visible reflow from the system face to the real ones.

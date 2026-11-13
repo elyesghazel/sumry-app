@@ -1,15 +1,6 @@
 import React, { useState } from 'react';
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { TextInput } from '../src/components/TextInput';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '../src/components/Screen';
 import { Glass } from '../src/components/Glass';
@@ -69,7 +60,9 @@ export default function SignIn() {
           automaticallyAdjustKeyboardInsets
         >
           <View style={styles.brand}>
-            <Text style={[type.display, { color: theme.text }]}>Sumry</Text>
+            <Text style={[type.display, { color: theme.text }]}>
+              sumry<Text style={{ color: theme.accent }}>.</Text>
+            </Text>
             <Text style={[type.body, { color: theme.textMuted, marginTop: space.xs }]}>
               See your money. Understand it.
             </Text>
