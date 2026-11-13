@@ -1,4 +1,5 @@
-import { Transaction, TransactionKind } from './api';
+// generated - edit in sumry/web core/ and run scripts/sync-core.sh. sha256:e58b69207a2dc8d98166b21c762077140e2442d02c06e89377ea1ab95eda381f
+import type { Transaction, TransactionKind } from './types';
 
 export const CURRENCY = 'CHF';
 
@@ -6,12 +7,41 @@ const money = new Intl.NumberFormat('de-CH', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+const whole = new Intl.NumberFormat('de-CH', { maximumFractionDigits: 0 });
 
 /** "1'234.50" — no currency code; screens place that themselves where it belongs. */
 export const formatAmount = (value: number): string => money.format(Math.abs(value));
 
+/** "1'235" — for axes and dense tables where cents are noise. */
+export const formatWhole = (value: number): string => whole.format(Math.abs(value));
+
 export const formatSigned = (value: number): string =>
   `${value < 0 ? '−' : ''}${money.format(Math.abs(value))}`;
+
+/** The amount a transaction counts for in reports: its base-currency value. */
+export const baseOf = (tx: { amount: number; baseAmount?: number | null }): number =>
+  tx.baseAmount ?? tx.amount;
+
+export const isoDay = (d: Date): string => {
+  // Local calendar date, not the UTC one — a late-evening entry must not shift a day.
+  const off = d.getTimezoneOffset() * 60000;
+  return new Date(d.getTime() - off).toISOString().slice(0, 10);
+};
+
+const shortDate = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
+const longDate = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+export const formatShortDate = (iso: string | Date): string => shortDate.format(new Date(iso));
+export const formatLongDate = (iso: string | Date): string => longDate.format(new Date(iso));
+
+/** "in 3 days", "tomorrow", "2 days ago". */
+export function relativeDays(iso: string, today = startOfDay(new Date())): string {
+  const d = startOfDay(new Date(`${iso.slice(0, 10)}T12:00:00`));
+  const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (diff === 0) return 'today';
+  if (diff === 1) return 'tomorrow';
+  if (diff === -1) return 'yesterday';
+  return diff > 0 ? `in ${diff} days` : `${-diff} days ago`;
+}
 
 /** How a transaction moves the balance of the account it sits on. */
 export const signOf = (kind: TransactionKind): 1 | -1 =>
@@ -80,17 +110,3 @@ export function groupByDay(transactions: Transaction[]): DaySection[] {
 
 export const sameMonth = (a: Date, b: Date): boolean =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-
-/** The amount a transaction counts for in reports: its base-currency value. */
-export const baseOf = (tx: { amount: number; baseAmount?: number | null }): number =>
-  tx.baseAmount ?? tx.amount;
-
-/** "in 3 days", "tomorrow", "2 days ago". */
-export function relativeDays(iso: string, today = startOfDay(new Date())): string {
-  const d = startOfDay(new Date(`${iso.slice(0, 10)}T12:00:00`));
-  const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
-  if (diff === 0) return 'today';
-  if (diff === 1) return 'tomorrow';
-  if (diff === -1) return 'yesterday';
-  return diff > 0 ? `in ${diff} days` : `${-diff} days ago`;
-}
