@@ -18,7 +18,6 @@ export const INSIGHT_CARDS = [
   { key: 'categories', label: 'By category' },
   { key: 'months', label: 'Month comparison' },
   { key: 'accounts', label: 'Account split' },
-  { key: 'budgets', label: 'Budgets' },
   { key: 'top', label: 'Most frequent' },
 ] as const;
 
@@ -61,7 +60,7 @@ const DEFAULTS: Preferences = {
   defaultAccountId: null,
   haptics: true,
   timeframe: '30d',
-  cards: ['summary', 'forecast', 'subscriptions', 'trend', 'categories', 'months', 'accounts', 'budgets', 'top'],
+  cards: ['summary', 'forecast', 'subscriptions', 'trend', 'categories', 'months', 'accounts', 'top'],
   showRunningBalance: false,
   groupByDay: true,
 };
