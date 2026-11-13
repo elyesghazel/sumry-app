@@ -5,20 +5,6 @@ import type { DocumentPickerAsset } from 'expo-document-picker';
 
 /** Reading picked files and handing generated ones to the share sheet. */
 
-/** Upload ceiling for statements, matching the backend's limit. */
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-
-export type PickedKind = 'csv' | 'pdf' | 'xml' | 'unknown';
-
-export function kindOf(asset: Pick<DocumentPickerAsset, 'name' | 'mimeType'>): PickedKind {
-  const name = asset.name.toLowerCase();
-  const mime = (asset.mimeType ?? '').toLowerCase();
-  if (name.endsWith('.pdf') || mime.includes('pdf')) return 'pdf';
-  if (name.endsWith('.xml') || mime.includes('xml')) return 'xml';
-  if (name.endsWith('.csv') || name.endsWith('.txt') || mime.includes('csv') || mime.startsWith('text/')) return 'csv';
-  return 'unknown';
-}
-
 async function blobOf(asset: DocumentPickerAsset): Promise<Blob> {
   if (asset.file) return asset.file;
   const res = await fetch(asset.uri);

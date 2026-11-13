@@ -11,17 +11,24 @@ import { Btn, Card, Divider, Header, Hint, KV, Pills, Section } from '../src/com
 import { useToast } from '../src/components/Toast';
 import { useConfirm } from '../src/components/ConfirmDialog';
 import { useApp } from '../src/store';
-import { formatAmount, maskIbansIn, type ImportPreview, type ImportRow } from '../src/core';
+import {
+  MAX_IMPORT_BYTES,
+  formatAmount,
+  importFormatFor,
+  maskIbansIn,
+  reconcileOffer,
+  splitImportWarnings,
+  statementFileKind,
+  type ImportPreview,
+  type ImportRow,
+} from '../src/core';
 import { api } from '../src/api';
-import { MAX_UPLOAD_BYTES, kindOf, readBase64, readText } from '../src/lib/files';
+import { readBase64, readText } from '../src/lib/files';
 import { shortDay } from '../src/lib/dates';
 import { usePreferences, useTheme } from '../src/preferences';
 import { radius, space, type } from '../src/theme';
 
 const TYPES = ['application/pdf', 'text/csv', 'text/comma-separated-values', 'application/xml', 'text/xml', 'text/plain'];
-
-/** A warning that carries the backend's redacted diagnostics rather than a one-liner. */
-const isDiagnostics = (w: string) => w.includes('\n') || /diagnos/i.test(w);
 
 /**
  * Statement import: pick a PDF, camt.053 XML or CSV, see what would be booked (duplicates
@@ -58,7 +65,7 @@ export default function Import() {
     const res = await DocumentPicker.getDocumentAsync({ type: TYPES, copyToCacheDirectory: true, multiple: false });
     if (res.canceled || !res.assets?.length) return;
     const asset = res.assets[0];
-    if (asset.size && asset.size > MAX_UPLOAD_BYTES) {
+    if (asset.size && asset.size > MAX_IMPORT_BYTES) {
       setError(`${asset.name} is ${(asset.size / 1024 / 1024).toFixed(1)} MB. The limit is 10 MB.`);
       return;
     }
@@ -67,11 +74,13 @@ export default function Import() {
     setRows([]);
     setBusy('reading');
     try {
-      const kind = kindOf(asset);
+      const kind = statementFileKind(asset.name, asset.mimeType);
+      if (!kind) throw new Error(`${asset.name} is not a PDF, XML or CSV statement.`);
+      const format = importFormatFor(kind);
       const input =
         kind === 'csv'
-          ? { accountId, csv: await readText(asset), fileName: asset.name }
-          : { accountId, fileBase64: await readBase64(asset), fileName: asset.name };
+          ? { accountId, format, csv: await readText(asset), fileName: asset.name }
+          : { accountId, format, fileBase64: await readBase64(asset), fileName: asset.name };
       const p = await api.importPreview(token, input);
       setPreview(p);
       setRows(p.rows.map((r) => ({ ...r, include: !r.duplicate })));
@@ -100,11 +109,15 @@ export default function Import() {
         }),
       );
       toast.success(`Booked ${res.booked} ${res.booked === 1 ? 'entry' : 'entries'}`, res.skipped.length ? `${res.skipped.length} skipped` : file?.name);
-      const closing = preview.statementClosingBalance;
-      if (closing !== null && closing !== undefined) {
-        const fresh = (await api.accounts(token)).find((a) => a.id === accountId);
-        const diff = fresh ? closing - fresh.currentBalance : 0;
-        if (fresh && Math.abs(diff) >= 0.005) {
+      const fresh = (await api.accounts(token)).find((a) => a.id === accountId);
+      const offer = fresh ? reconcileOffer(preview, fresh.currentBalance) : null;
+      if (fresh && offer) {
+        const closing = offer.statementBalance;
+        const diff = offer.difference;
+        if (offer.matches) {
+          // The statement proves the balance: stamp the account as checked.
+          await mutate((t) => api.reconcileAccount(t, accountId, closing, 'Abgleich Kontoauszug')).catch(() => {});
+        } else {
           const ok = await confirm({
             title: 'Line up the balance?',
             message: `The statement closes at ${formatAmount(closing)}, Sumry shows ${formatAmount(fresh.currentBalance)} for ${fresh.accountName}. Book the ${diff > 0 ? '+' : '−'}${formatAmount(diff)} difference as an "Einstellung" entry?`,
@@ -129,8 +142,7 @@ export default function Import() {
   };
 
   const warnings = preview?.warnings ?? [];
-  const diagnostics = warnings.filter(isDiagnostics);
-  const plain = warnings.filter((w) => !isDiagnostics(w));
+  const { notes: plain, diagnostics } = splitImportWarnings(warnings);
   const editingRow = editing !== null ? rows[editing] : null;
 
   return (
