@@ -1,4 +1,4 @@
-// generated - edit in sumry/web core/ and run scripts/sync-core.sh. sha256:36f4cefeafcfeee31b8b327f6a0f94ea30adc5832f7dcef50720dd9c588e0f0e
+// generated - edit in sumry/web core/ and run scripts/sync-core.sh. sha256:20eb977e2125a672af2659d3353223331ef574dfcb2febf55d5846b4abfe165b
 /**
  * Every shape the Sumry backend sends or accepts, shared by the web app and the phone app.
  * Field names follow the Kotlin DTOs under backend/src/main/kotlin; money arrives as numbers.
@@ -334,6 +334,13 @@ export type ImportRow = {
   duplicate: boolean;
   duplicateOfId: string | null;
   currencyMismatch: boolean;
+  /** Entries this row matched: one, or several when the row is their sum. */
+  matchIds?: string[];
+  matchKind?: 'same-day' | 'near' | 'split' | null;
+  /** "Kebab · 9 Oct", or "Top-up 100 + Fee 0.35 · 2 Oct" for a split. */
+  matchNote?: string | null;
+  /** The bank's booking day when `date` is the earlier purchase day. */
+  bookingDate?: string | null;
 };
 
 export type ImportPreview = {
@@ -351,6 +358,35 @@ export type ImportPreview = {
   statementFrom?: string | null;
   statementTo?: string | null;
   statementOpeningBalance?: number | null;
+  /** Opening plus every row; equals the closing balance when nothing was misread. */
+  computedClosingBalance?: number | null;
+  /** true: rows add up to the closing balance, false: they don't, null: no balances in the file. */
+  balanceOk?: boolean | null;
+  /** The server can ask Claude about unmatched rows (POST /api/import/check). */
+  aiCheckAvailable?: boolean;
+};
+
+export type ImportCheckInput = {
+  accountId: string;
+  rows: { line: number; date: string; bookingDate?: string | null; description: string; amount: number; kind: TransactionKind }[];
+  matchedIds?: string[];
+  statementFrom?: string | null;
+  statementTo?: string | null;
+};
+
+export type ImportCheckSuggestion = {
+  line: number;
+  verdict: 'logged' | 'new' | 'suspicious';
+  matchIds: string[];
+  categoryLabel: string | null;
+  reason: string;
+};
+
+export type ImportCheck = {
+  suggestions: ImportCheckSuggestion[];
+  /** Hand-made reconcile adjustments ("Abgleich") the new rows would count twice. */
+  adjustments: { id: string; note: string }[];
+  summary: string;
 };
 
 export type ImportCommitInput = {

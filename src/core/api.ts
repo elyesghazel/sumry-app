@@ -1,4 +1,4 @@
-// generated - edit in sumry/web core/ and run scripts/sync-core.sh. sha256:574b11706f05608fc9d2c192758b65de55b113ead30041176f3cdc37a7ccc3f4
+// generated - edit in sumry/web core/ and run scripts/sync-core.sh. sha256:a68c4a9cb199aae64319f26fe5051f7db937184d0ff88795cbe640ed4fdcf08a
 import type {
   Account,
   Budget,
@@ -14,6 +14,8 @@ import type {
   Goal,
   GoalInput,
   GoalPatch,
+  ImportCheck,
+  ImportCheckInput,
   ImportCommit,
   ImportCommitInput,
   ImportPreview,
@@ -308,6 +310,8 @@ export function createApi(config: ApiConfig) {
     /** Parses a statement without booking anything: CSV text, or a PDF / camt.053 file as base64. */
     importPreview: (token: string, input: ImportPreviewInput) =>
       request<ImportPreview>('/api/import/preview', { token, body: { format: 'auto', ...input } }),
+    importCheck: (token: string, input: ImportCheckInput) =>
+      request<ImportCheck>('/api/import/check', { token, body: input }),
     importCommit: (token: string, input: ImportCommitInput) =>
       request<ImportCommit>('/api/import/commit', { token, body: input }),
     exportCsv: (token: string, p: ExportParams = {}) =>
