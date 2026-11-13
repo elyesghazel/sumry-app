@@ -25,3 +25,38 @@ export function categoryMonths(transactions: Transaction[], label: string, month
   }
   return out;
 }
+
+export type DayBalance = { date: string; label: string; value: number };
+
+/**
+ * End-of-day balance of `accounts` for each of the last `days` days, rebuilt backwards
+ * from today's balances (account currency summed as is, like balanceSeries). Daily points
+ * keep a line smooth where balanceSeries switches to monthly buckets.
+ */
+export function dailyBalance(
+  accounts: { id: string; currentBalance: number }[],
+  transactions: Transaction[],
+  days: number,
+  now = new Date(),
+): DayBalance[] {
+  const ids = new Set(accounts.map((a) => a.id));
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const delta = new Map<string, number>();
+  for (const t of transactions) {
+    if (!t.userAccountId || !ids.has(t.userAccountId)) continue;
+    const k = keyOf(new Date(t.date));
+    const sign = t.kind === 'INCOME' || t.kind === 'TRANSFER_IN' ? 1 : -1;
+    delta.set(k, (delta.get(k) ?? 0) + sign * t.amount);
+  }
+  let running = accounts.reduce((s, a) => s + (a.currentBalance ?? 0), 0);
+  const out: DayBalance[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(end);
+    d.setDate(end.getDate() - i);
+    const k = keyOf(d);
+    out.push({ date: k, label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), value: Math.round(running * 100) / 100 });
+    running -= delta.get(k) ?? 0;
+  }
+  return out.reverse();
+}

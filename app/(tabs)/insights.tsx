@@ -23,6 +23,7 @@ import {
   totals,
 } from '../../src/core';
 import { monthKey, monthTitle, shiftMonthKey } from '../../src/lib/dates';
+import { dailyBalance } from '../../src/lib/derive';
 import { TIMEFRAMES, usePreferences, useTheme } from '../../src/preferences';
 import { categoryColor, radius, space, type } from '../../src/theme';
 
@@ -50,7 +51,10 @@ export default function Insights() {
   const movers = useMemo(() => categoryMovers(transactions, range, 6), [transactions, range]);
   const months = useMemo(() => monthlySeries(transactions, 6), [transactions]);
   const frequent = useMemo(() => frequentDescriptions(transactions, range), [transactions, range]);
-  const balance = useMemo(() => balanceSeries(accounts, transactions, range), [accounts, transactions, range]);
+  const balance = useMemo(
+    () => (range.days <= 200 ? dailyBalance(accounts, transactions, range.days) : balanceSeries(accounts, transactions, range)),
+    [accounts, transactions, range],
+  );
   const categoryByLabel = useMemo(() => new Map(categories.map((c) => [c.label, c])), [categories]);
   const perDay = now.expense / Math.max(1, range.days);
   const lastMonth = shiftMonthKey(monthKey(new Date()), -1);

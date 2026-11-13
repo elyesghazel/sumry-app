@@ -12,7 +12,6 @@ import { useDestructiveAction } from '../../src/components/ConfirmDialog';
 import { useApp } from '../../src/store';
 import { useDeleteTransaction } from '../../src/actions';
 import {
-  balanceSeries,
   formatAmount,
   formatShortDate,
   projectBalance,
@@ -22,6 +21,7 @@ import {
 } from '../../src/core';
 import { api } from '../../src/api';
 import { daysSince, shortDay } from '../../src/lib/dates';
+import { dailyBalance } from '../../src/lib/derive';
 import { usePreferences, useTheme } from '../../src/preferences';
 import { space, type } from '../../src/theme';
 
@@ -64,7 +64,7 @@ export default function AccountDetail() {
 
   const own = useMemo(() => transactions.filter((t) => t.userAccountId === id), [transactions, id]);
   const range = useMemo(() => resolveRange(span), [span]);
-  const series = useMemo(() => (account ? balanceSeries([account], own, range) : []), [account, own, range]);
+  const series = useMemo(() => (account ? dailyBalance([account], own, range.days) : []), [account, own, range]);
   const projection = useMemo(() => (account ? projectBalance([account], upcoming, 14) : null), [account, upcoming]);
   const recent = useMemo(() => [...own].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 15), [own]);
   const categoryByLabel = useMemo(() => new Map(categories.map((c) => [c.label, c])), [categories]);
@@ -176,7 +176,7 @@ export default function AccountDetail() {
               {next.map((o) => (
                 <KV
                   key={`${o.plannedId}-${o.date}`}
-                  label={`${formatShortDate(o.date)} · ${o.name}`}
+                  label={`${o.overdue ? 'overdue' : formatShortDate(o.date)} · ${o.name}`}
                   value={`${o.kind === 'INCOME' ? '+' : '−'}${mask(formatAmount(o.amount), 'all')}`}
                   onPress={() => router.push(`/planned/${o.plannedId}`)}
                 />
