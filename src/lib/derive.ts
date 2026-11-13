@@ -30,11 +30,11 @@ export type DayBalance = { date: string; label: string; value: number };
 
 /**
  * End-of-day balance of `accounts` for each of the last `days` days, rebuilt backwards
- * from today's balances (account currency summed as is, like balanceSeries). Daily points
+ * from today's balances in base currency, so it ends on the net worth Today shows. Daily points
  * keep a line smooth where balanceSeries switches to monthly buckets.
  */
 export function dailyBalance(
-  accounts: { id: string; currentBalance: number }[],
+  accounts: { id: string; currentBalance: number; baseBalance?: number | null }[],
   transactions: Transaction[],
   days: number,
   now = new Date(),
@@ -47,9 +47,9 @@ export function dailyBalance(
     if (!t.userAccountId || !ids.has(t.userAccountId)) continue;
     const k = keyOf(new Date(t.date));
     const sign = t.kind === 'INCOME' || t.kind === 'TRANSFER_IN' ? 1 : -1;
-    delta.set(k, (delta.get(k) ?? 0) + sign * t.amount);
+    delta.set(k, (delta.get(k) ?? 0) + sign * baseOf(t));
   }
-  let running = accounts.reduce((s, a) => s + (a.currentBalance ?? 0), 0);
+  let running = accounts.reduce((s, a) => s + (a.baseBalance ?? a.currentBalance ?? 0), 0);
   const out: DayBalance[] = [];
   for (let i = 0; i < days; i++) {
     const d = new Date(end);

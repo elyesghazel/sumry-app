@@ -164,7 +164,7 @@ export default function Insights() {
           <>
             <Section title="Spending over time" detail={range.label.toLowerCase()} />
             <Card>
-              <BarSeries data={buckets.map((b) => ({ key: b.key, label: b.label, value: b.value }))} color={theme.accent} currency={prefs.currency} />
+              <BarSeries data={buckets.map((b) => ({ key: b.key, label: range.days > 62 ? b.label : b.start.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), value: b.value }))} color={theme.accent} currency={prefs.currency} />
             </Card>
           </>
         ) : null}
