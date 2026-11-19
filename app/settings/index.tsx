@@ -13,7 +13,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Btn, Header } from '../../src/components/ui';
 import { shareTextFile } from '../../src/lib/files';
 import { shortDay } from '../../src/lib/dates';
-import { API_URL, api } from '../../src/api';
+import { api } from '../../src/api';
 import { TIMEFRAMES, usePreferences, useTheme } from '../../src/preferences';
 import { useToast } from '../../src/components/Toast';
 import { useConfirm, useDestructiveAction } from '../../src/components/ConfirmDialog';
@@ -28,7 +28,7 @@ export default function Settings() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { prefs, set, reset, mask } = usePreferences();
-  const { user, accounts, categories, transactions, budgets, rules, signOut, token, mutate } = useApp();
+  const { user, accounts, categories, transactions, budgets, rules, signOut, token, server, mutate } = useApp();
   const [shortcut, setShortcut] = useState<ShortcutToken | null>(null);
 
   const exportAs = async (kind: 'csv' | 'json') => {
@@ -332,9 +332,10 @@ export default function Settings() {
           <View style={{ flexDirection: 'row', gap: space.sm, paddingHorizontal: space.lg, marginTop: space.sm }}>
             <Btn small icon="copy-outline" label="Copy again" onPress={() => void Clipboard.setStringAsync(shortcut.token).then(() => toast.success('Copied'))} />
             <Btn small icon="share-outline" label="Share" onPress={() => void Share.share({ message: shortcut.token })} />
+            <Btn small icon="server-outline" label="Copy server" onPress={() => void Clipboard.setStringAsync(server).then(() => toast.success('Server copied', server))} />
           </View>
         ) : null}
-        <Hint text="For the Wallet automation that logs Apple Pay payments. The token can only log entries and list categories; “Sign out everywhere” revokes it." />
+        <Hint text={`For the Wallet automation that logs Apple Pay payments. The Shortcut posts to ${server}. The token can only log entries and list categories; “Sign out everywhere” revokes it.`} />
 
         <Group title="Organise">
           <LinkRow
@@ -373,7 +374,7 @@ export default function Settings() {
             <Stat label="Transactions" value={String(transactions.length)} />
             <Stat label="Categories" value={String(categories.length)} />
             <Stat label="Accounts" value={String(accounts.length)} />
-            <Stat label="Server" value={API_URL.replace(/^https?:\/\//, '')} />
+            <Stat label="Server" value={server.replace(/^https?:\/\//, '')} />
           </View>
         </Group>
 
