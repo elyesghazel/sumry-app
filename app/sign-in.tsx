@@ -11,9 +11,10 @@ import { useTheme } from '../src/preferences';
 export default function SignIn() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { signIn, register } = useApp();
+  const { signIn, register, server, changeServer } = useApp();
 
   const [mode, setMode] = useState<'sign-in' | 'register'>('sign-in');
+  const [serverInput, setServerInput] = useState(server);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,6 +25,9 @@ export default function SignIn() {
     setBusy(true);
     setError(null);
     try {
+      // Switching servers is validated (and the old data dropped) before any credentials go out.
+      const target = await changeServer(serverInput);
+      setServerInput(target);
       if (mode === 'sign-in') await signIn(email, password);
       else await register(username, email, password);
     } catch (e) {
@@ -34,6 +38,7 @@ export default function SignIn() {
   };
 
   const canSubmit =
+    serverInput.trim().length > 0 &&
     email.trim().length > 0 &&
     password.length > 0 &&
     (mode === 'sign-in' || username.trim().length > 0);
@@ -70,6 +75,22 @@ export default function SignIn() {
 
           <Glass style={styles.card}>
             <View style={styles.cardInner}>
+              <View style={{ gap: space.xs }}>
+                <Text style={[type.label, { color: theme.textMuted }]}>Server</Text>
+                <TextInput
+                  value={serverInput}
+                  onChangeText={setServerInput}
+                  placeholder="https://sumry.example.ch"
+                  placeholderTextColor={theme.textFaint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="url"
+                  keyboardType="url"
+                  textContentType="URL"
+                  style={field}
+                />
+              </View>
+
               {mode === 'register' ? (
                 <TextInput
                   value={username}
