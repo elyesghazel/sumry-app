@@ -57,6 +57,13 @@ eas build --platform android --profile preview
 Produces an APK (rather than the Play Store AAB that `production` builds). Download it from
 the link EAS prints and sideload it.
 
+Release APKs are built by GitHub Actions instead (`.github/workflows/release.yml`): pushing a
+`v*` tag runs `expo prebuild`, `gradlew assembleRelease`, signs with the release keystore from
+the repo secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+`ANDROID_KEY_PASSWORD`) and attaches `sumry-<version>.apk` to the GitHub Release. The version
+name comes from the tag, the version code is `major * 1000000 + minor * 1000 + patch`. These
+APKs are arm64 only and have OTA updates turned off.
+
 ### iPhone
 
 Apple only lets signed apps onto a device, and signing needs an [Apple Developer Program](https://developer.apple.com/programs/)
