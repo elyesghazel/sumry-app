@@ -6,7 +6,9 @@ import React, {
   useMemo,
   useState,
 } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { tokenStore } from './lib/secureStore';
+import { checkServer, normalizeServer, serverStore } from './lib/server';
 import { usePreferences } from './preferences';
 import {
   Account,
@@ -25,9 +27,11 @@ import {
   Subscriptions,
   Transaction,
 } from './core';
-import { api } from './api';
+import { api, currentServer, setServer } from './api';
 
 const TOKEN_KEY = 'sumry.token';
+/** Device caches that belong to one server's data and must not leak into another's. */
+const SERVER_CACHES = ['sumry.snooze.v1'];
 
 type Status = 'loading' | 'signed-out' | 'signed-in';
 
@@ -35,6 +39,8 @@ type Ctx = {
   status: Status;
   user: Me | null;
   token: string | null;
+  /** Origin of the server in use, e.g. `https://sumry.elyesghazel.ch`. */
+  server: string;
 
   accounts: Account[];
   categories: Category[];
@@ -58,6 +64,11 @@ type Ctx = {
   signOut: (everywhere?: boolean) => Promise<void>;
   /** Swaps the stored token, e.g. after a password change hands back a new one. */
   adoptToken: (token: string) => Promise<void>;
+  /**
+   * Validates and switches to another server. A real change signs out and clears cached
+   * data first; returns the normalised address. Throws a readable error when unreachable.
+   */
+  changeServer: (input: string) => Promise<string>;
   refresh: () => Promise<void>;
   /** Runs an authenticated call, then re-reads everything the change could have touched. */
   mutate: <T>(fn: (token: string) => Promise<T>) => Promise<T>;
@@ -72,6 +83,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>('loading');
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<Me | null>(null);
+  const [server, setServerState] = useState<string>(currentServer());
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -174,6 +186,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const saved = await serverStore.get();
+      setServer(saved);
+      if (!cancelled) setServerState(saved);
       const stored = await tokenStore.get(TOKEN_KEY).catch(() => null);
       if (!stored) {
         if (!cancelled) setStatus('signed-out');
@@ -236,6 +251,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setToken(t);
   }, []);
 
+  const changeServer = useCallback(
+    async (input: string) => {
+      const next = normalizeServer(input);
+      if (next === currentServer()) return next;
+      await checkServer(next);
+      if (token) await api.logout(token).catch(() => {});
+      await clearSession();
+      await AsyncStorage.multiRemove(SERVER_CACHES).catch(() => {});
+      await serverStore.set(next);
+      setServer(next);
+      setServerState(next);
+      return next;
+    },
+    [token, clearSession],
+  );
+
   const mutate = useCallback(
     async <T,>(fn: (t: string) => Promise<T>): Promise<T> => {
       if (!token) throw new ApiError(401, 'Not signed in');
@@ -251,6 +282,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       status,
       user,
       token,
+      server,
       accounts,
       categories,
       transactions,
@@ -269,6 +301,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       register,
       signOut,
       adoptToken,
+      changeServer,
       refresh,
       mutate,
     }),
@@ -276,6 +309,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       status,
       user,
       token,
+      server,
       accounts,
       categories,
       transactions,
@@ -294,6 +328,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       register,
       signOut,
       adoptToken,
+      changeServer,
       refresh,
       mutate,
     ],
